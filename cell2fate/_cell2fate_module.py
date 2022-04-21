@@ -8,32 +8,18 @@ from pyro.nn import PyroModule
 from scvi import REGISTRY_KEYS
 import pandas as pd
 from scvi.nn import one_hot
-from mypackage.utils import G_a, G_b, mu_mRNA_discreteAlpha_globalTime_twoStates_OnePlate
+from cell2fate.utils import G_a, G_b, mu_mRNA_discreteAlpha_globalTime_twoStates_OnePlate
 
-class RegressionBackgroundDetectionTechPyroModel(PyroModule):
+class DifferentiationModel_OneLineage_DiscreteTwoStateTranscriptionRate(PyroModule):
     r"""
-    Given cell type annotation for each cell, the corresponding reference cell type signatures :math:`g_{f,g}`,
-    which represent the average mRNA count of each gene `g` in each cell type `f={1, .., F}`,
-    are estimated from sc/snRNA-seq data using Negative Binomial regression,
-    which allows to robustly combine data across technologies and batches.
-
-    This model combines batches, and treats data :math:`D` as Negative Binomial distributed,
-    given mean :math:`\mu` and overdispersion :math:`\alpha`:
-
-    .. math::
-        D_{c,g} \sim \mathtt{NB}(alpha=\alpha_{g}, mu=\mu_{c,g})
-    .. math::
-        \mu_{c,g} = (\mu_{f,g} + s_{e,g}) * y_e * y_{t,g}
-
-    Which is equivalent to:
-
-    .. math::
-        D_{c,g} \sim \mathtt{Poisson}(\mathtt{Gamma}(\alpha_{f,g}, \alpha_{f,g} / \mu_{c,g}))
-
-    Here, :math:`\mu_{f,g}` denotes average mRNA count in each cell type :math:`f` for each gene :math:`g`;
-    :math:`y_c` denotes normalisation for each experiment :math:`e` to account for  sequencing depth.
-    :math:`y_{t,g}` denotes per gene :math:`g` detection efficiency normalisation for each technology :math:`t`.
-
+    Models spliced and unspliced counts for each gene as a dynamical process in which each gene can switch on
+    at one point in time to a specific transcription rate and then optionally switches off again to a transcription rate of 0.
+    Splicing and degredation rates are constant for each gene. The underlying equations are similar to
+    "Bergen et al. (2020), Generalizing RNA velocity to transient cell states through dynamical modeling"
+    with the difference that time is cell-specific and thus shared across all genes. In addition, the model includes
+    negative binomial noise, batch effects and technical variables, similar to:
+    "Kleshchevnikov et al. (2022), Cell2location maps fine-grained cell types in spatial transcriptomics".
+    Although in the final version of this model technical variables will be modelled seperately for spliced and unspliced counts.
     """
 
     def __init__(
@@ -310,8 +296,6 @@ class RegressionBackgroundDetectionTechPyroModel(PyroModule):
         T_gOFF = pyro.deterministic('T_gOFF', T_gON + t_gOFF*(T_max*self.one_point_one - T_gON))
 
         # =========== Mean expression according to RNAvelocity model ======================= #
-        # Here we use the version with a global time parameter and two discrete transcriptional states for each gene (ON or OFF)
-        # (No consideration of different lineages, no correlations across genes and fixed splicing and degredation rates for each gene)
         mu_RNAvelocity =  pyro.deterministic('mu_RNAvelocity',
                           mu_mRNA_discreteAlpha_globalTime_twoStates_OnePlate(alpha_ONg, alpha_OFFg, beta_g, gamma_g, T_c, T_gON, T_gOFF,
                                                                              self.zeros))

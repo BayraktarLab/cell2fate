@@ -1,7 +1,7 @@
 import pyro
 from scvi.data import synthetic_iid
 
-from mypackage import MyModel, MyPyroModel
+from cell2fate import MyModel, MyPyroModel
 
 
 def test_mymodel():

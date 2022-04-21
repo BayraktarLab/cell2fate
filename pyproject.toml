@@ -2,7 +2,7 @@
 include_trailing_comma = true
 multi_line_output = 3
 profile = "black"
-skip_glob = ["docs/*", "mypackage/__init__.py"]
+skip_glob = ["docs/*", "cell2fate/__init__.py"]
 
 [tool.poetry]
 authors = ["Adam Gayoso <adamgayoso@berkeley.edu>", "Galen Xing <gx2113@columbia.edu>", "Romain Lopez <romain_lopez@gmail.com>"]
@@ -23,7 +23,7 @@ homepage = "https://github.com/YosefLab/scvi-tools-skeleton"
 license = "BSD-3-Clause"
 name = "scvi-tools-skeleton"
 packages = [
-  {include = "mypackage"},
+  {include = "cell2fate"},
 ]
 readme = "README.md"
 version = "0.4.0"

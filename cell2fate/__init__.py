@@ -1,13 +1,11 @@
-"""scvi-tools-skeleton."""
+"""cell2fate"""
 
 import logging
 
 from rich.console import Console
 from rich.logging import RichHandler
 
-from ._mymodel import MyModel, MyModule
-from ._mypyromodel import MyPyroModel, MyPyroModule
-from ._reference_model import RegressionModel
+from ._cell2fate_model import Cell2fate
 
 # https://github.com/python-poetry/poetry/pull/2366#issuecomment-652418094
 # https://github.com/python-poetry/poetry/issues/144#issuecomment-623927302
@@ -16,8 +14,8 @@ try:
 except ModuleNotFoundError:
     import importlib_metadata
 
-package_name = "scvi-tools-skeleton"
-__version__ = importlib_metadata.version(package_name)
+package_name = "cell2fate"
+# __version__ = importlib_metadata.version(package_name)
 
 logger = logging.getLogger(__name__)
 # set the logging level
@@ -28,11 +26,11 @@ console = Console(force_terminal=True)
 if console.is_jupyter is True:
     console.is_jupyter = False
 ch = RichHandler(show_path=False, console=console, show_time=False)
-formatter = logging.Formatter("mypackage: %(message)s")
+formatter = logging.Formatter("cell2fate: %(message)s")
 ch.setFormatter(formatter)
 logger.addHandler(ch)
 
 # this prevents double outputs
 logger.propagate = False
 
-__all__ = ["MyModel", "MyModule", "MyPyroModel", "MyPyroModule", "LogisticModel"]
+__all__ = ["Cell2fate"]

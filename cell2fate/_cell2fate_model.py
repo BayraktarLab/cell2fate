@@ -18,20 +18,17 @@ from scvi.utils import setup_anndata_dsp
 
 from cell2location.models.base._pyro_base_reference_module import RegressionBaseModule
 from cell2location.models.base._pyro_mixin import PltExportMixin, QuantileMixin
-from ._reference_module import RegressionBackgroundDetectionTechPyroModel
+from ._cell2fate_module import DifferentiationModel_OneLineage_DiscreteTwoStateTranscriptionRate
 
-class RegressionModel(QuantileMixin, PyroSampleMixin, PyroSviTrainMixin, PltExportMixin, BaseModelClass):
+class Cell2fate(QuantileMixin, PyroSampleMixin, PyroSviTrainMixin, PltExportMixin, BaseModelClass):
     """
-    Model which estimates per cluster average mRNA count account for batch effects. User-end model class.
-
-    https://github.com/BayraktarLab/cell2location
+    Cell2fate model. User-end model class. See Module class for description of the model.
 
     Parameters
     ----------
     adata
-        single-cell AnnData object that has been registered via :func:`~scvi.data.setup_anndata`.
-    use_gpu
-        Use the GPU?
+        single-cell AnnData object that has been registered via :func:`~scvi.data.setup_anndata`
+        and contains spliced and unspliced counts in adata.layers['spliced'], adata.layers['unspliced']
     **model_kwargs
         Keyword args for :class:`~scvi.external.LocationModelLinearDependentWMultiExperimentModel`
 
@@ -45,7 +42,6 @@ class RegressionModel(QuantileMixin, PyroSampleMixin, PyroSviTrainMixin, PltExpo
         self,
         adata: AnnData,
         model_class=None,
-        use_average_as_initial: bool = True,
         **model_kwargs,
     ):
         # in case any other model was created before that shares the same parameter names.
@@ -54,7 +50,7 @@ class RegressionModel(QuantileMixin, PyroSampleMixin, PyroSviTrainMixin, PltExpo
         super().__init__(adata)
 
         if model_class is None:
-            model_class = RegressionBackgroundDetectionTechPyroModel
+            model_class = DifferentiationModel_OneLineage_DiscreteTwoStateTranscriptionRate
 
         # use per class average as initial value
 #             model_kwargs["init_vals"] = {"per_cluster_mu_fg": aver.values.T.astype("float32") + 0.0001}
@@ -66,7 +62,7 @@ class RegressionModel(QuantileMixin, PyroSampleMixin, PyroSviTrainMixin, PltExpo
             n_batch=self.summary_stats["n_batch"],
             **model_kwargs,
         )
-        self._model_summary_string = f'RegressionBackgroundDetectionTech model with the following params: \nn_batch: {self.summary_stats["n_batch"]} '
+        self._model_summary_string = f'Differentiation model with the following params: \nn_batch: {self.summary_stats["n_batch"]} '
         self.init_params_ = self._get_init_params(locals())
 
     @classmethod
