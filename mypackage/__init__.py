@@ -7,6 +7,7 @@ from rich.logging import RichHandler
 
 from ._mymodel import MyModel, MyModule
 from ._mypyromodel import MyPyroModel, MyPyroModule
+from ._reference_model import RegressionModel
 
 # https://github.com/python-poetry/poetry/pull/2366#issuecomment-652418094
 # https://github.com/python-poetry/poetry/issues/144#issuecomment-623927302
@@ -34,4 +35,4 @@ logger.addHandler(ch)
 # this prevents double outputs
 logger.propagate = False
 
-__all__ = ["MyModel", "MyModule", "MyPyroModel", "MyPyroModule"]
+__all__ = ["MyModel", "MyModule", "MyPyroModel", "MyPyroModule", "LogisticModel"]
