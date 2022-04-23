@@ -253,7 +253,6 @@ class DifferentiationModel_OneLineage_DiscreteTwoStateTranscriptionRate(PyroModu
     def forward(self, u_data, s_data, idx, batch_index):
         
         obs2sample = one_hot(batch_index, self.n_batch)        
-        obs_plate = self.create_plates(u_data, s_data, idx, batch_index)
         
         # ===================== Kinetic Rates ======================= #
         # Transcription rate:
@@ -285,8 +284,7 @@ class DifferentiationModel_OneLineage_DiscreteTwoStateTranscriptionRate(PyroModu
         # =====================Time======================= #
         # Global time for each cell:
         T_max = pyro.sample('T_max', dist.Gamma(G_a(self.Tmax_mean, self.Tmax_sd), G_b(self.Tmax_mean, self.Tmax_sd)))
-        with obs_plate:
-            t_c = pyro.sample('t_c', dist.Uniform(self.zero, self.one))
+        t_c = pyro.sample('t_c', dist.Uniform(self.zero, self.one).expand([self.n_obs, 1]).to_event(2))
         T_c = pyro.deterministic('T_c', t_c*T_max)
         # Global switch on time for each gene:
         t_gON = pyro.sample('t_gON', dist.Uniform(self.zero, self.one).expand([1, self.n_vars]).to_event(2))
@@ -317,11 +315,9 @@ class DifferentiationModel_OneLineage_DiscreteTwoStateTranscriptionRate(PyroModu
         )
 
         beta = (obs2sample @ detection_hyp_prior_alpha) / (obs2sample @ detection_mean_y_e)
-        with obs_plate:
-            detection_y_c = pyro.sample(
+        detection_y_c = pyro.sample(
                 "detection_y_c",
-                dist.Gamma(obs2sample @ detection_hyp_prior_alpha, beta),
-            )  # (self.n_obs, 1)
+                dist.Gamma(obs2sample @ detection_hyp_prior_alpha, beta).expand([1,self.n_obs, 1]).to_event(3))  # (self.n_obs, 1)
         
         # =====================Gene-specific additive component ======================= #
         # s_{e,g} accounting for background, free-floating RNA
@@ -411,118 +407,3 @@ class DifferentiationModel_OneLineage_DiscreteTwoStateTranscriptionRate(PyroModu
             mu = mu * np.dot(obs2extra_categoricals, samples["detection_tech_gene_tg"])
 
         return {"mu": mu, "alpha": alpha}
-
-    def normalize(self, samples, adata_manager, adata):
-        r"""Normalise expression data by estimated technical variables.
-
-        Parameters
-        ----------
-        samples
-            dictionary with values of the posterior
-        adata
-            registered anndata
-        Returns
-        ---------
-        adata with normalized counts added to adata.layers['unspliced_norm'], ['spliced_norm']
-        """
-
-        obs2sample = adata_manager.get_from_registry(REGISTRY_KEYS.BATCH_KEY)
-        obs2sample = pd.get_dummies(obs2sample.flatten())
-
-        unspliced_corrected = adata_manager.get_from_registry('unspliced')/samples["detection_y_c"] - np.dot(obs2sample, samples["s_g_gene_add"])
-        adata.layers['unspliced_norm'] = unspliced_corrected - unspliced_corrected.min()
-
-        spliced_corrected = adata_manager.get_from_registry('spliced')/samples["detection_y_c"] - np.dot(obs2sample, samples["s_g_gene_add"])
-        adata.layers['spliced_norm'] = spliced_corrected - spliced_corrected.min()
-
-        return adata
-
-    def export_posterior(
-            self,
-            adata,
-            sample_kwargs: Optional[dict] = None,
-            export_slot: str = "mod",
-            full_velocity_posterior = False
-        ):
-            """
-            Summarises posterior distribution and exports results to anndata object. 
-            Also computes RNAvelocity (based on posterior of rates)
-            1. adata.obs: Latent time, sequencing depth constant
-            2. adata.var: transcription/splicing/degredation rates, switch on and off times
-            3. adata.uns: Posterior of all parameters ('mean', 'sd', 'q05', 'q95' and optionally all samples),
-            model name, date
-            4. adata.layers: 'velocity' (expected gradient of spliced counts), 'velocity_sd' (uncertainty in this gradient)
-            5. adata.uns: If "return_samples: True" and "full_velocity_posterior = True" full posterior distribution for velocity
-            is saved in "adata.uns['velocity_posterior']". 
-            Parameters
-            ----------
-            adata
-                anndata object where results should be saved
-            sample_kwargs
-                optinoally a dictionary of arguments for self.sample_posterior, namely:
-                    num_samples - number of samples to use (Default = 1000).
-                    batch_size - data batch size (keep low enough to fit on GPU, default 2048).
-                    use_gpu - use gpu for generating samples?
-                    return_samples - export all posterior samples? (Otherwise just summary statistics)
-            export_slot
-                adata.uns slot where to export results
-            full_velocity_posterior
-                whether to save full posterior of velocity (only possible if "return_samples: True")
-            Returns
-            -------
-            adata with posterior added in adata.obs, adata.var and adata.uns
-            """
-
-            sample_kwargs = sample_kwargs if isinstance(sample_kwargs, dict) else dict()
-
-            # generate samples from posterior distributions for all parameters
-            # and compute mean, 5%/95% quantiles and standard deviation
-            self.samples = self.sample_posterior(**sample_kwargs)
-
-            # export posterior distribution summary for all parameters and
-            # annotation (model, date, var, obs and cell type names) to anndata object
-            adata.uns[export_slot] = self._export2adata(self.samples)
-
-            if sample_kwargs['return_samples']:
-                print('Warning: Saving ALL posterior samples. Specify "return_samples: False" to save just summary statistics.')
-                adata.uns[export_slot]['post_samples'] = self.samples['posterior_samples']
-
-            adata.obs['latent_time_mean'] = self.samples['post_sample_means']['T_c']
-            adata.obs['latent_time_sd'] = self.samples['post_sample_stds']['T_c']      
-            adata.obs['normalization_factor_mean'] = self.samples['post_sample_means']['detection_y_c']
-            adata.obs['normalization_factor_sd'] = self.samples['post_sample_stds']['detection_y_c']
-
-            adata.var['transcription_rate_mean'] = self.samples['post_sample_means']['alpha_g'].flatten()
-            adata.var['transcription_rate_sd'] = self.samples['post_sample_stds']['alpha_g'].flatten()
-            adata.var['splicing_rate_mean'] = self.samples['post_sample_means']['beta_g'].flatten()
-            adata.var['splicing_rate_sd'] = self.samples['post_sample_stds']['beta_g'].flatten()
-            adata.var['degredation_rate_mean'] = self.samples['post_sample_means']['gamma_g'].flatten()
-            adata.var['degredation_rate_sd'] = self.samples['post_sample_stds']['gamma_g'].flatten()
-            adata.var['switchON_time_mean'] = self.samples['post_sample_means']['T_gON'].flatten()
-            adata.var['switchON_time_sd'] = self.samples['post_sample_stds']['T_gON'].flatten()
-            adata.var['switchOFF_time_mean'] = self.samples['post_sample_means']['T_gOFF'].flatten()
-            adata.var['switchOFF_time_sd'] = self.samples['post_sample_stds']['T_gOFF'].flatten()
-
-            adata.layers['velocity'] = self.samples['post_sample_means']['beta_g'] * \
-            self.samples['post_sample_means']['mu_RNAvelocity'][0,:,:] - \
-            self.samples['post_sample_means']['gamma_g'] * self.samples['post_sample_means']['mu_RNAvelocity'][1,:,:]
-            adata.layers['velocity_sd'] = np.sqrt((self.samples['post_sample_means']['beta_g']**2 +
-                                                   self.samples['post_sample_stds']['beta_g']**2)*
-                                                 (self.samples['post_sample_means']['mu_RNAvelocity'][0,:,:]**2 +
-                                                  self.samples['post_sample_stds']['mu_RNAvelocity'][0,:,:]**2) -
-                                                 (self.samples['post_sample_means']['beta_g']**2*
-                                                  self.samples['post_sample_means']['mu_RNAvelocity'][0,:,:]**2) +
-                                                 (self.samples['post_sample_means']['gamma_g']**2 +
-                                                  self.samples['post_sample_stds']['gamma_g']**2)*
-                                                 (self.samples['post_sample_means']['mu_RNAvelocity'][1,:,:]**2 +
-                                                  self.samples['post_sample_stds']['mu_RNAvelocity'][1,:,:]**2) -
-                                                 (self.samples['post_sample_means']['gamma_g']**2*
-                                                  self.samples['post_sample_means']['mu_RNAvelocity'][1,:,:]**2))
-            if sample_kwargs['return_samples'] and full_velocity_posterior == True:
-                print('Warning: Saving ALL posterior samples for velocity in "adata.uns["velocity_posterior"]". \
-                Specify "return_samples: False" or "full_velocity_posterior = False" to save just summary statistics.')
-                adata.uns['velocity_posterior'] = self.samples['posterior_samples']['beta_g'] * \
-                self.samples['posterior_samples']['mu_RNAvelocity'][:,0,:,:] - self.samples['posterior_samples']['gamma_g'] * \
-                self.samples['posterior_samples']['mu_RNAvelocity'][:,1,:,:]
-
-            return adata
