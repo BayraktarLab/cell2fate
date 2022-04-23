@@ -8,16 +8,18 @@ from pyro.nn import PyroModule
 from scvi import REGISTRY_KEYS
 import pandas as pd
 from scvi.nn import one_hot
-from cell2fate.utils import G_a, G_b, mu_mRNA_discreteAlpha_globalTime_twoStates_OnePlate
+from cell2fate.utils import G_a, G_b, mu_mRNA_discreteAlpha_globalTime_twoStates_OnePlate2
 
 class DifferentiationModel_MultiLineage_DiscreteTwoStateTranscriptionRate(PyroModule):
     r"""
-    Models spliced and unspliced counts for each gene as a dynamical process in which each gene can switch on
+    - Models spliced and unspliced counts for each gene as a dynamical process in which each gene can switch on
     at one point in time to a specific transcription rate and then optionally switches off again to a transcription rate of 0.
-    Splicing and degredation rates are constant for each gene. The underlying equations are similar to
+    Splicing and degredation rates are constant for each gene. 
+    - The underlying equations are similar to
     "Bergen et al. (2020), Generalizing RNA velocity to transient cell states through dynamical modeling"
-    with the difference that time is cell-specific and thus shared across all genes. In addition, the model includes
-    negative binomial noise, batch effects and technical variables, similar to:
+    The difference is that time is cell-specific and thus shared across all genes. Furthermore, multiple lineages can be
+    inferred with this model, by assuming different transcription rates and switch times in each lineage.
+    - In addition, the model includes negative binomial noise, batch effects and technical variables, similar to:
     "Kleshchevnikov et al. (2022), Cell2location maps fine-grained cell types in spatial transcriptomics".
     Although in the final version of this model technical variables will be modelled seperately for spliced and unspliced counts.
     """
@@ -235,7 +237,7 @@ class DifferentiationModel_MultiLineage_DiscreteTwoStateTranscriptionRate(PyroMo
             return self._get_fn_args_from_batch_no_cat
 
     def create_plates(self, u_data, s_data, idx, batch_index):
-        return pyro.plate("obs_plate", size=self.n_obs, dim=-2, subsample=idx)
+        return pyro.plate("obs_plate", size=self.n_obs, dim=-3, subsample=idx)
 
     def list_obs_plate_vars(self):
         """Create a dictionary with the name of observation/minibatch plate,
@@ -253,6 +255,7 @@ class DifferentiationModel_MultiLineage_DiscreteTwoStateTranscriptionRate(PyroMo
     def forward(self, u_data, s_data, idx, batch_index):
         
         obs2sample = one_hot(batch_index, self.n_batch)        
+        obs_plate = self.create_plates(u_data, s_data, idx, batch_index)
         
         # ===================== Kinetic Rates ======================= #
         # Transcription rate:
@@ -262,7 +265,7 @@ class DifferentiationModel_MultiLineage_DiscreteTwoStateTranscriptionRate(PyroMo
         alpha_sd = pyro.sample('alpha_sd',
                    dist.Gamma(G_a(self.transcription_rate_sd_hyp_prior_mean, self.transcription_rate_sd_hyp_prior_sd),
                               G_b(self.transcription_rate_sd_hyp_prior_mean, self.transcription_rate_sd_hyp_prior_sd)))
-        alpha_ONg = pyro.sample('alpha_g', dist.Gamma(alpha_mu, alpha_sd).expand([1, self.n_vars]).to_event(2))
+        alpha_ONg = pyro.sample('alpha_g', dist.Gamma(alpha_mu, alpha_sd).expand([1, self.n_vars, 1]).to_event(3))
         alpha_OFFg = self.alpha_OFFg
         # Splicing rate:
         beta_mu = pyro.sample('beta_mu',
@@ -271,7 +274,7 @@ class DifferentiationModel_MultiLineage_DiscreteTwoStateTranscriptionRate(PyroMo
         beta_sd = pyro.sample('beta_sd',
                    dist.Gamma(G_a(self.splicing_rate_sd_hyp_prior_mean, self.splicing_rate_sd_hyp_prior_sd),
                               G_b(self.splicing_rate_sd_hyp_prior_mean, self.splicing_rate_sd_hyp_prior_sd)))
-        beta_g = pyro.sample('beta_g', dist.Gamma(G_a(beta_mu, beta_sd), G_b(beta_mu, beta_sd)).expand([1, self.n_vars]).to_event(2))
+        beta_g = pyro.sample('beta_g', dist.Gamma(G_a(beta_mu, beta_sd), G_b(beta_mu, beta_sd)).expand([1,self.n_vars,1]).to_event(3))
         # Degredation rate:
         gamma_mu = pyro.sample('gamma_mu',
                    dist.Gamma(G_a(self.degredation_rate_mean_hyp_prior_mean, self.degredation_rate_mean_hyp_prior_sd),
@@ -279,24 +282,25 @@ class DifferentiationModel_MultiLineage_DiscreteTwoStateTranscriptionRate(PyroMo
         gamma_sd = pyro.sample('gamma_sd',
                    dist.Gamma(G_a(self.degredation_rate_sd_hyp_prior_mean, self.degredation_rate_sd_hyp_prior_sd),
                               G_b(self.degredation_rate_sd_hyp_prior_mean, self.degredation_rate_sd_hyp_prior_sd)))
-        gamma_g = pyro.sample('gamma_g', dist.Gamma(G_a(gamma_mu, gamma_sd), G_b(gamma_mu, gamma_sd)).expand([1, self.n_vars]).to_event(2))
+        gamma_g = pyro.sample('gamma_g', dist.Gamma(G_a(gamma_mu, gamma_sd), G_b(gamma_mu, gamma_sd)).expand([1, self.n_vars,1]).to_event(3))
 
         # =====================Time======================= #
         # Global time for each cell:
         T_max = pyro.sample('T_max', dist.Gamma(G_a(self.Tmax_mean, self.Tmax_sd), G_b(self.Tmax_mean, self.Tmax_sd)))
-        t_c = pyro.sample('t_c', dist.Uniform(self.zero, self.one).expand([self.n_obs, 1]).to_event(2))
+        with obs_plate:
+            t_c = pyro.sample('t_c', dist.Uniform(self.zero, self.one).expand([self.n_obs, 1, 1]))
         T_c = pyro.deterministic('T_c', t_c*T_max)
         # Global switch on time for each gene:
-        t_gON = pyro.sample('t_gON', dist.Uniform(self.zero, self.one).expand([1, self.n_vars]).to_event(2))
+        t_gON = pyro.sample('t_gON', dist.Uniform(self.zero, self.one).expand([1, self.n_vars, 1]).to_event(2))
         T_gON = pyro.deterministic('T_gON', -T_max*self.zero_point_one + t_gON*T_max*self.one_point_two)
         # Global switch off time for each gene:
-        t_gOFF = pyro.sample('t_gOFF', dist.Uniform(self.zero, self.one).expand([1, self.n_vars]).to_event(2))
+        t_gOFF = pyro.sample('t_gOFF', dist.Uniform(self.zero, self.one).expand([1, self.n_vars, 1]).to_event(2))
         T_gOFF = pyro.deterministic('T_gOFF', T_gON + t_gOFF*(T_max*self.one_point_one - T_gON))
 
         # =========== Mean expression according to RNAvelocity model ======================= #
         mu_RNAvelocity =  pyro.deterministic('mu_RNAvelocity',
-                          mu_mRNA_discreteAlpha_globalTime_twoStates_OnePlate(alpha_ONg, alpha_OFFg, beta_g, gamma_g, T_c, T_gON, T_gOFF,
-                                                                             self.zeros))
+                          mu_mRNA_discreteAlpha_globalTime_twoStates_OnePlate2(alpha_ONg[:,:,0], alpha_OFFg, beta_g[:,:,0], gamma_g[:,:,0],
+                                                                               T_c[:,:,0], T_gON[:,:,0], T_gOFF[:,:,0], self.zeros))
         
         # =====================Cell-specific detection efficiency ======================= #
         # y_c with hierarchical mean prior
@@ -315,9 +319,10 @@ class DifferentiationModel_MultiLineage_DiscreteTwoStateTranscriptionRate(PyroMo
         )
 
         beta = (obs2sample @ detection_hyp_prior_alpha) / (obs2sample @ detection_mean_y_e)
-        detection_y_c = pyro.sample(
+        with obs_plate:
+            detection_y_c = pyro.sample(
                 "detection_y_c",
-                dist.Gamma(obs2sample @ detection_hyp_prior_alpha, beta).expand([1,self.n_obs, 1]).to_event(3))  # (self.n_obs, 1)
+                dist.Gamma((obs2sample @ detection_hyp_prior_alpha).unsqueeze(dim=-1), beta.unsqueeze(dim=-1)).expand([self.n_obs, 1, 1]))  # (self.n_obs, 1)
         
         # =====================Gene-specific additive component ======================= #
         # s_{e,g} accounting for background, free-floating RNA
@@ -354,19 +359,21 @@ class DifferentiationModel_MultiLineage_DiscreteTwoStateTranscriptionRate(PyroMo
         )
         alpha_g_inverse = pyro.sample(
             "alpha_g_inverse",
-            dist.Exponential(alpha_g_phi_hyp).expand([1, self.n_vars]).to_event(2),
+            dist.Exponential(alpha_g_phi_hyp).expand([self.n_vars,1]).to_event(2),
         )
 
         # =====================Expected expression ======================= #
         # overdispersion
         alpha = self.ones / alpha_g_inverse.pow(2)
         # biological expression
-        mu = (mu_RNAvelocity + obs2sample @ s_g_gene_add  # contaminating RNA
+        mu = (mu_RNAvelocity + (obs2sample @ s_g_gene_add).unsqueeze(dim=-1)  # contaminating RNA
         ) * detection_y_c  # cell-specific normalisation
-
+        
         # =====================DATA likelihood ======================= #
         # Likelihood (sampling distribution) of data_target & add overdispersion via NegativeBinomial
-        pyro.sample("data_target", dist.GammaPoisson(concentration= alpha, rate= alpha / mu).expand([2, self.n_obs, self.n_vars]).to_event(3), obs=torch.stack([u_data, s_data], axis = 0))
+        with obs_plate:
+            pyro.sample("data_target", dist.GammaPoisson(concentration= alpha, rate= alpha / mu),
+                        obs=torch.stack([u_data, s_data], axis = 2))
 
     # =====================Other functions======================= #
     def compute_expected(self, samples, adata_manager, ind_x=None):

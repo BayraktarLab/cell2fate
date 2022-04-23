@@ -241,6 +241,17 @@ def mu_mRNA_discreteAlpha_OnePlate(alpha, beta, gamma, tau, u0, s0):
 
     return torch.stack([mu_u, mu_s], axis = 0)
 
+def mu_mRNA_discreteAlpha_OnePlate2(alpha, beta, gamma, tau, u0, s0):
+    '''Calculates expected value of spliced and unspliced counts as a function of rates,
+    latent time and initial states'''
+    
+    mu_u = u0*torch.exp(-beta*tau) + (alpha/beta)* (1 - torch.exp(-beta*tau))
+    mu_s = (s0*torch.exp(-gamma*tau) + 
+    alpha/gamma * (1 - torch.exp(-gamma*tau)) +
+    (alpha - beta * u0)/(gamma - beta + 10**(-5)) * (torch.exp(-gamma*tau) - torch.exp(-beta*tau)))
+
+    return torch.stack([mu_u, mu_s], axis = 2)
+
 def mu_mRNA_discreteAlpha_withPlates(alpha, beta, gamma, tau, u0, s0):
     '''Calculates expected value of spliced and unspliced counts as a function of rates,
     latent time and initial states'''
@@ -332,6 +343,25 @@ def mu_mRNA_discreteAlpha_globalTime_twoStates_OnePlate(alpha_ON, alpha_OFF, bet
     s0_g = 10**(-5) + ~boolean*initial_state[1,:,:]
     # Unspliced and spliced count variance for each gene in each cell:
     return torch.clip(mu_mRNA_discreteAlpha_OnePlate(alpha_cg, beta, gamma, tau_cg, u0_g, s0_g), min = 10**(-5))
+
+def mu_mRNA_discreteAlpha_globalTime_twoStates_OnePlate2(alpha_ON, alpha_OFF, beta, gamma, T_c, T_gON, T_gOFF, Zeros):
+    '''Calculates expected value of spliced and unspliced counts as a function of rates,
+    global latent time, initial states and global switch times between two states'''
+    n_cells = T_c.shape[-2]
+    n_genes = alpha_ON.shape[-1]
+    tau = torch.clip(T_c - T_gON, min = 10**(-5))
+    t0 = T_gOFF - T_gON
+    # Transcription rate in each cell for each gene:
+    boolean = (tau < t0).reshape(n_cells, n_genes)
+    alpha_cg = alpha_ON*boolean + alpha_OFF*~boolean
+    # Time since changepoint for each cell and gene:
+    tau_cg = tau*boolean + (tau - t0)*~boolean
+    # Initial condition for each cell and gene:
+    initial_state = mu_mRNA_discreteAlpha_OnePlate2(alpha_ON, beta, gamma, t0, Zeros, Zeros)
+    u0_g = 10**(-5) + ~boolean*initial_state[:,:,0]
+    s0_g = 10**(-5) + ~boolean*initial_state[:,:,1]
+    # Unspliced and spliced count variance for each gene in each cell:
+    return torch.clip(mu_mRNA_discreteAlpha_OnePlate2(alpha_cg, beta, gamma, tau_cg, u0_g, s0_g), min = 10**(-5))
 
 def var_mRNA_discreteAlpha_globalTime_twoStates(alpha_ON, alpha_OFF, beta, gamma, T_c, T_gON, T_gOFF):
     '''Calculates expected value of spliced and unspliced counts as a function of rates,

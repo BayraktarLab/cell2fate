@@ -19,7 +19,7 @@ from scvi.utils import setup_anndata_dsp
 
 from cell2location.models.base._pyro_base_reference_module import RegressionBaseModule
 from cell2location.models.base._pyro_mixin import PltExportMixin, QuantileMixin
-from ._cell2fate_module import DifferentiationModel_OneLineage_DiscreteTwoStateTranscriptionRate
+from ._cell2fate_module2 import DifferentiationModel_MultiLineage_DiscreteTwoStateTranscriptionRate
 
 class Cell2fate(QuantileMixin, PyroSampleMixin, PyroSviTrainMixin, PltExportMixin, BaseModelClass):
     """
@@ -51,7 +51,7 @@ class Cell2fate(QuantileMixin, PyroSampleMixin, PyroSviTrainMixin, PltExportMixi
         super().__init__(adata)
 
         if model_class is None:
-            model_class = DifferentiationModel_OneLineage_DiscreteTwoStateTranscriptionRate
+            model_class = DifferentiationModel_MultiLineage_DiscreteTwoStateTranscriptionRate
 
         # use per class average as initial value
 #             model_kwargs["init_vals"] = {"per_cluster_mu_fg": aver.values.T.astype("float32") + 0.0001}
@@ -238,8 +238,8 @@ class Cell2fate(QuantileMixin, PyroSampleMixin, PyroSviTrainMixin, PltExportMixi
             print('Warning: Saving ALL posterior samples. Specify "return_samples: False" to save just summary statistics.')
             adata.uns[export_slot]['post_samples'] = self.samples['posterior_samples']
 
-        adata.obs['latent_time_mean'] = self.samples['post_sample_means']['T_c']
-        adata.obs['latent_time_sd'] = self.samples['post_sample_stds']['T_c']      
+        adata.obs['latent_time_mean'] = self.samples['post_sample_means']['T_c'].flatten()
+        adata.obs['latent_time_sd'] = self.samples['post_sample_stds']['T_c'].flatten()      
         adata.obs['normalization_factor_mean'] = self.samples['post_sample_means']['detection_y_c'].flatten()
         adata.obs['normalization_factor_sd'] = self.samples['post_sample_stds']['detection_y_c'].flatten()
 
@@ -254,27 +254,27 @@ class Cell2fate(QuantileMixin, PyroSampleMixin, PyroSviTrainMixin, PltExportMixi
         adata.var['switchOFF_time_mean'] = self.samples['post_sample_means']['T_gOFF'].flatten()
         adata.var['switchOFF_time_sd'] = self.samples['post_sample_stds']['T_gOFF'].flatten()
 
-        adata.layers['velocity'] = self.samples['post_sample_means']['beta_g'] * \
-        self.samples['post_sample_means']['mu_RNAvelocity'][0,:,:] - \
-        self.samples['post_sample_means']['gamma_g'] * self.samples['post_sample_means']['mu_RNAvelocity'][1,:,:]
-        adata.layers['velocity_sd'] = np.sqrt((self.samples['post_sample_means']['beta_g']**2 +
-                                               self.samples['post_sample_stds']['beta_g']**2)*
-                                             (self.samples['post_sample_means']['mu_RNAvelocity'][0,:,:]**2 +
-                                              self.samples['post_sample_stds']['mu_RNAvelocity'][0,:,:]**2) -
-                                             (self.samples['post_sample_means']['beta_g']**2*
-                                              self.samples['post_sample_means']['mu_RNAvelocity'][0,:,:]**2) +
-                                             (self.samples['post_sample_means']['gamma_g']**2 +
-                                              self.samples['post_sample_stds']['gamma_g']**2)*
-                                             (self.samples['post_sample_means']['mu_RNAvelocity'][1,:,:]**2 +
-                                              self.samples['post_sample_stds']['mu_RNAvelocity'][1,:,:]**2) -
-                                             (self.samples['post_sample_means']['gamma_g']**2*
-                                              self.samples['post_sample_means']['mu_RNAvelocity'][1,:,:]**2))
+        adata.layers['velocity'] = self.samples['post_sample_means']['beta_g'][...,0] * \
+        self.samples['post_sample_means']['mu_RNAvelocity'][:,:,0] - \
+        self.samples['post_sample_means']['gamma_g'][...,0] * self.samples['post_sample_means']['mu_RNAvelocity'][:,:,1]
+        adata.layers['velocity_sd'] = np.sqrt((self.samples['post_sample_means']['beta_g'][...,0]**2 +
+                                               self.samples['post_sample_stds']['beta_g'][...,0]**2)*
+                                             (self.samples['post_sample_means']['mu_RNAvelocity'][:,:,0]**2 +
+                                              self.samples['post_sample_stds']['mu_RNAvelocity'][:,:,0]**2) -
+                                             (self.samples['post_sample_means']['beta_g'][...,0]**2*
+                                              self.samples['post_sample_means']['mu_RNAvelocity'][:,:,0]**2) +
+                                             (self.samples['post_sample_means']['gamma_g'][...,0]**2 +
+                                              self.samples['post_sample_stds']['gamma_g'][...,0]**2)*
+                                             (self.samples['post_sample_means']['mu_RNAvelocity'][:,:,1]**2 +
+                                              self.samples['post_sample_stds']['mu_RNAvelocity'][:,:,1]**2) -
+                                             (self.samples['post_sample_means']['gamma_g'][...,0]**2*
+                                              self.samples['post_sample_means']['mu_RNAvelocity'][:,:,1]**2))
         if sample_kwargs['return_samples'] and full_velocity_posterior == True:
             print('Warning: Saving ALL posterior samples for velocity in "adata.uns["velocity_posterior"]". \
             Specify "return_samples: False" or "full_velocity_posterior = False" to save just summary statistics.')
-            adata.uns['velocity_posterior'] = self.samples['posterior_samples']['beta_g'] * \
-            self.samples['posterior_samples']['mu_RNAvelocity'][:,0,:,:] - self.samples['posterior_samples']['gamma_g'] * \
-            self.samples['posterior_samples']['mu_RNAvelocity'][:,1,:,:]
+            adata.uns['velocity_posterior'] = self.samples['posterior_samples']['beta_g'][...,0] * \
+            self.samples['posterior_samples']['mu_RNAvelocity'][...,0] - self.samples['posterior_samples']['gamma_g'][...,0] * \
+            self.samples['posterior_samples']['mu_RNAvelocity'][...,1]
         
         if normalize:
             print('Computing normalized counts based on posterior of technical variables.')
