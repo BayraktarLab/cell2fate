@@ -13,7 +13,7 @@ A tutorial notebook is available here:
 
 We suggest using a separate conda environment for installing cell2fate.
 
-Create conda environment and install `cell2fate` package
+Create a conda environment and install the `cell2fate` package
 
 ```bash
 conda create -y -n cell2fate_env python=3.9
