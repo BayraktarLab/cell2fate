@@ -1,8 +1,8 @@
 ### cell2fate
 
-cell2fate models differentiation based on single-cell data. 
-At this point we can infer latent time, transcription rate changes, splicing rates, degredation rates and RNAvelocity within one lineage of cells.
-We will add new versions soon that infer:
+cell2fate models differentiation based on single-cell data. />
+At this point we can infer latent time, transcription rate changes, splicing rates, degredation rates and RNAvelocity within one lineage of cells. />
+We will add new versions soon that infer: />
 1.) multiple lineages
 2.) modules of genes that change rates simultaneously
 3.) Transcription factors that cause rate changes in gene modules.
@@ -24,7 +24,7 @@ conda activate cell2fate_env
 pip install git+https://github.com/AlexanderAivazidis/cell2fate
 ```
 
-Finally, to use this environment in jupyter notebook, add jupyter kernel for this environment:
+Finally, to use this environment in a jupyter notebook, add a jupyter kernel for this environment:
 
 ```bash
 conda activate cell2fate_env
