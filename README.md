@@ -1,15 +1,47 @@
-# scvi-tools-skeleton
+### cell2fate
 
-[![Stars](https://img.shields.io/github/stars/YosefLab/scvi-tools-skeleton?logo=GitHub&color=yellow)](https://github.com/YosefLab/scvi-tools/stargazers)
-[![Documentation Status](https://readthedocs.org/projects/scvi-tools-skeleton/badge/?version=latest)](https://scvi-tools-skeleton.readthedocs.io/en/stable/?badge=stable)
-![Build Status](https://github.com/YosefLab/scvi-tools-skeleton/workflows/scvi-tools-skeleton/badge.svg)
-[![codecov](https://codecov.io/gh/YosefLab/scvi-tools-skeleton/branch/main/graph/badge.svg?token=BGI9Z8R11R)](https://codecov.io/gh/YosefLab/scvi-tools-skeleton)
-[![Code Style](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/python/black)
+cell2fate models differentiation based on single-cell data. 
+At this point we can infer latent time, transcription rate changes, splicing rates, degredation rates and RNAvelocity within one lineage of cells.
+We will add new versions soon that infer:
+1.) multiple lineages
+2.) modules of genes that change rates simultaneously
+3.) Transcription factors that cause rate changes in gene modules.
 
-Skeleton repository for creating novel models with
-[scvi-tools](https://www.scvi-tools.org/en/stable/). For questions about
-using this skeleton, please use the scvi-tools
-[forum](https://discourse.scvi-tools.org/).
+## Usage and Tutorials
 
+A tutorial notebook is available here:
 
-Getting started development using this skeleton is similar to [getting started](https://docs.scvi-tools.org/en/stable/contributing/index.html) with scvi-tools.
+## Installation
+
+We suggest using a separate conda environment for installing cell2fate.
+
+Create conda environment and install `cell2fate` package
+
+```bash
+conda create -y -n cell2fate_env python=3.9
+
+conda activate cell2fate_env
+pip install git+https://github.com/AlexanderAivazidis/cell2fate
+```
+
+Finally, to use this environment in jupyter notebook, add jupyter kernel for this environment:
+
+```bash
+conda activate cell2fate_env
+python -m ipykernel install --user --name=cell2fate_env --display-name='Environment (cell2fate_env)'
+```
+
+If you do not have conda please install Miniconda first:
+
+```bash
+cd /path/to/software
+wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
+bash Miniconda3-latest-Linux-x86_64.sh
+# use prefix /path/to/software/miniconda3
+```
+
+Before installing cell2fate and it's dependencies, it could be necessary to make sure that you are creating a fully isolated conda environment by telling python to NOT use user site for installing packages, ideally by adding this line to your `~/.bashrc` file , but this would also work during a terminal session:
+
+```bash
+export PYTHONNOUSERSITE="someletters"
+```
