@@ -3,7 +3,7 @@
 cell2fate models differentiation based on single-cell data. At this point we can infer latent time, transcription/splicing/degredation rates and RNAvelocity within one lineage of cells. We will add new versions soon that infer: \
 1.) multiple lineages \
 2.) modules of genes that are activated together (i.e. change rates simultaneously) \
-3.) the effect transcription factors have on module activation probabilities.
+3.) the effect expression of different transcription factors has on module activation probabilities.
 
 ## Usage and Tutorials
 
