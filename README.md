@@ -1,10 +1,5 @@
 ### cell2fate
 
-The goal of cell2fate is to model differentiation as a sequential process of stochastic cell fates decisions between activation of competing transcriptional programs. At this point we can infer latent time, transcription/splicing/degredation rates and RNAvelocity within one lineage of cells. We will add new versions soon that infer: \
-1.) multiple lineages \
-2.) transcriptional programs \
-3.) the effect different transcription factors have on program activation probabilities.
-
 ## Usage and Tutorials
 
 A tutorial notebook is available here:
