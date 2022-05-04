@@ -2,7 +2,8 @@
 
 ## Usage and Tutorials
 
-A tutorial notebook is available [here](https://github.com/AlexanderAivazidis/cell2fate/blob/main/notebooks/cell2fate_tutorial_pancreas.ipynb)
+The currently recommended workflow using the currently best performing model is in this tutorial [here](https://github.com/AlexanderAivazidis/cell2fate/blob/main/notebooks/cell2fate_tutorial_pancreas.ipynb). /
+Benchmarking of all models is done in a seperate repository: https://github.com/AlexanderAivazidis/fate_benchmarking
 
 ## Installation
 
