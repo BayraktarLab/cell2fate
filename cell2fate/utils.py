@@ -11,6 +11,90 @@ import scvelo as scv
 from numpy.linalg import norm
 from scipy.sparse import csr_matrix
 from numpy import inner
+import matplotlib.pyplot as plt
+
+def removeOutliers(adata, min_total, max_total, min_ratio, max_ratio, plot = True, remove = True):
+    """
+    Removes outlier cells from adata object based on total counts or unspliced/spliced counts ratio.   
+    Parameters
+    ----------
+    adata
+        anndata
+    min_total
+        lower threshold for total counts
+    max total
+        upper threshold for total counts
+    min_ratio
+        lower threshold for ratio of unspliced/spliced counts
+    max_ratio
+        upper threshold for ratio of unspliced/spliced counts
+    plot
+        whether to show plot overviews of identified outliers in UMAP and violin plots
+    remove
+        whether to return an adata object with outliers removed        
+    Returns
+    -------
+    Optionally adata object with outliers removed.
+    """
+    adata.obs['spliced_total'] = np.sum(adata.layers['spliced'], axis = 1)
+    adata.obs['unspliced_total'] = np.sum(adata.layers['unspliced'], axis = 1)
+    adata.obs['counts_total'] = adata.obs['spliced_total'] + adata.obs['unspliced_total']
+    adata.obs['unspliced_spliced_ratio'] = adata.obs['unspliced_total']/adata.obs['spliced_total']
+    subset = np.array([adata.obs['counts_total'].iloc[i] > min_total and
+             adata.obs['counts_total'].iloc[i] < max_total and
+             adata.obs['unspliced_spliced_ratio'].iloc[i] > min_ratio and
+             adata.obs['unspliced_spliced_ratio'].iloc[i] < max_ratio for
+             i in range(len(adata.obs['counts_total']))])
+    subset_ratio = np.array([adata.obs['unspliced_spliced_ratio'].iloc[i] > min_ratio and
+             adata.obs['unspliced_spliced_ratio'].iloc[i] < max_ratio for
+             i in range(len(adata.obs['counts_total']))])
+    subset_total = np.array([adata.obs['counts_total'].iloc[i] > min_total and
+             adata.obs['counts_total'].iloc[i] < max_total for
+             i in range(len(adata.obs['counts_total']))])
+    adata.obs['Outliers'] = ~subset
+    adata.obs['Counts Outliers'] = 'False'
+    adata.obs['Counts Outliers'].loc[~subset_total] = 'True'
+    adata.obs['Ratio Outliers'] = 'False'
+    adata.obs['Ratio Outliers'].loc[~subset_ratio] = 'True'
+    if plot:
+        fig, ax = plt.subplots(2,5, figsize = (20, 7))
+        sc.pl.umap(adata, color = ['clusters'], legend_loc = 'on data', size = 200, ax = ax[0,0], show = False)
+        sc.pl.umap(adata, color = ['unspliced_spliced_ratio'], legend_loc = 'on data', size = 200, ax = ax[0,2], show = False)
+        sc.pl.umap(adata, color = ['counts_total'], legend_loc = 'on data', size = 200, ax = ax[0,1], show = False)
+        sc.pl.violin(adata, ['unspliced_spliced_ratio'], jitter=0.4, size = 3, ax = ax[0,4], show = False)
+        sc.pl.violin(adata, ['counts_total'], jitter=0.4, size = 3, ax = ax[0,3], show = False)
+        sc.pl.umap(adata, color = ['clusters'], legend_loc = 'on data', size = 200, ax = ax[1,0], show = False)
+        sc.pl.umap(adata, color = ['Counts Outliers'], legend_loc = None, size = 200, ax = ax[1,1], show = False)
+        sc.pl.umap(adata, color = ['Ratio Outliers'], legend_loc = None, size = 200, ax = ax[1,2], show = False)
+        sc.pl.violin(adata, ['unspliced_spliced_ratio'], jitter=0.4, size = 3, ax = ax[1,4], groupby = 'Ratio Outliers', show = False)
+        sc.pl.violin(adata, ['counts_total'], jitter=0.4, size = 3, groupby = 'Counts Outliers', ax = ax[1,3], show = False)
+        plt.tight_layout()
+    if not remove:
+        print(str(np.sum(~subset_total)) + ' Cells would be removed as total counts outliers.')
+        print(str(np.sum(~subset_ratio)) + ' Cells would be removed as ratio outliers.')
+    else:
+        print(str(np.sum(~subset_total)) + ' Cells removed as total counts outliers.')
+        print(str(np.sum(~subset_ratio)) + ' Cells removed as ratio outliers.')
+    if remove:
+        return adata[subset,:]
+
+def multiplot_from_generator(g, num_columns, figsize_for_one_row=None, row_size = 15):
+    # Copied from: https://aaronmcdaid.com/blog.posts/multiplot_from_generator/
+    # on 28/04/2022
+    # Plots multiple plots side by side in a jupyter notebook
+        next(g)
+        # default to 15-inch rows, with square subplots
+        if figsize_for_one_row is None:
+            figsize_for_one_row = (row_size, row_size/num_columns)
+        try:
+            while True:
+                # call plt.figure once per row
+                plt.figure(figsize=figsize_for_one_row)
+                for col in range(num_columns):
+                    ax = plt.subplot(1, num_columns, col+1)
+                    next(g)
+        except StopIteration:
+            pass
 
 def compute_velocity_graph_Bergen2020(adata, n_neighbours = None, full_posterior = True):
     """
@@ -33,7 +117,7 @@ def compute_velocity_graph_Bergen2020(adata, n_neighbours = None, full_posterior
     """
     M = len(adata.obs_names)
     if not n_neighbours:
-        n_neighbours = int(np.round(M*0.1, 0))
+        n_neighbours = int(np.round(M*0.05, 0))
     sc.pp.neighbors(adata, n_neighbors = n_neighbours)
     adata.obsp['binary'] = adata.obsp['connectivities'] != 0
     distances = []
@@ -209,10 +293,15 @@ def add_prior_knowledge(adata, cluster_column, initial_stages = None, initial_st
     return adata
 
 def G_a(mu, sd):
+    # Converts mean and sd for Gamma distribution into alpha parameter
     return mu**2/sd**2
 
 def G_b(mu, sd):
+    # Converts mean and sd for Gamma distribution into beta parameter
     return mu/sd**2
+#
+
+####------------RNAvelocity model equations -------------------- ######
 
 def mu_alpha(alpha_new, alpha_old, tau, lam):
     '''Calculates transcription rate as a function of new target transcription rate,
@@ -251,6 +340,28 @@ def mu_mRNA_discreteAlpha_OnePlate2(alpha, beta, gamma, tau, u0, s0):
     (alpha - beta * u0)/(gamma - beta + 10**(-5)) * (torch.exp(-gamma*tau) - torch.exp(-beta*tau)))
 
     return torch.stack([mu_u, mu_s], axis = 2)
+
+def mu_mRNA_discreteAlpha_OnePlate3(alpha, beta, gamma, tau, u0, s0, u_detection_factor_g):
+    '''Calculates expected value of spliced and unspliced counts as a function of rates,
+    latent time and initial states'''
+    
+    mu_u = u0*torch.exp(-beta*tau) + (alpha/beta)* (1 - torch.exp(-beta*tau))
+    mu_s = (s0*torch.exp(-gamma*tau) + 
+    alpha/gamma * (1 - torch.exp(-gamma*tau)) +
+    (alpha - beta * u0)/(gamma - beta + 10**(-5)) * (torch.exp(-gamma*tau) - torch.exp(-beta*tau)))
+
+    return torch.stack([mu_u, mu_s], axis = 2)
+
+def mu_mRNA_discreteAlpha_OnePlate_MultiLineage(alpha, beta, gamma, tau, u0, s0):
+    '''Calculates expected value of spliced and unspliced counts as a function of rates,
+    latent time and initial states'''
+    
+    mu_u = u0*torch.exp(-beta*tau) + (alpha/beta)* (1 - torch.exp(-beta*tau))
+    mu_s = (s0*torch.exp(-gamma*tau) + 
+    alpha/gamma * (1 - torch.exp(-gamma*tau)) +
+    (alpha - beta * u0)/(gamma - beta + 10**(-5)) * (torch.exp(-gamma*tau) - torch.exp(-beta*tau)))
+
+    return torch.stack([mu_u, mu_s], axis = -1)
 
 def mu_mRNA_discreteAlpha_withPlates(alpha, beta, gamma, tau, u0, s0):
     '''Calculates expected value of spliced and unspliced counts as a function of rates,
@@ -362,6 +473,46 @@ def mu_mRNA_discreteAlpha_globalTime_twoStates_OnePlate2(alpha_ON, alpha_OFF, be
     s0_g = 10**(-5) + ~boolean*initial_state[:,:,1]
     # Unspliced and spliced count variance for each gene in each cell:
     return torch.clip(mu_mRNA_discreteAlpha_OnePlate2(alpha_cg, beta, gamma, tau_cg, u0_g, s0_g), min = 10**(-5))
+
+def mu_mRNA_discreteAlpha_globalTime_twoStates_OnePlate3(alpha_ON, alpha_OFF, beta, gamma,
+                                                         T_c, T_gON, T_gOFF, Zeros, u_detection_factor_g):
+    '''Calculates expected value of spliced and unspliced counts as a function of rates,
+    global latent time, initial states and global switch times between two states'''
+    n_cells = T_c.shape[-2]
+    n_genes = alpha_ON.shape[-1]
+    tau = torch.clip(T_c - T_gON, min = 10**(-5))
+    t0 = T_gOFF - T_gON
+    # Transcription rate in each cell for each gene:
+    boolean = (tau < t0).reshape(n_cells, n_genes)
+    alpha_cg = alpha_ON*boolean + alpha_OFF*~boolean
+    # Time since changepoint for each cell and gene:
+    tau_cg = tau*boolean + (tau - t0)*~boolean
+    # Initial condition for each cell and gene:
+    initial_state = mu_mRNA_discreteAlpha_OnePlate2(alpha_ON, beta, gamma, t0, Zeros, Zeros, u_detection_factor_g)
+    u0_g = 10**(-5) + ~boolean*initial_state[:,:,0]
+    s0_g = 10**(-5) + ~boolean*initial_state[:,:,1]
+    # Unspliced and spliced count variance for each gene in each cell:
+    return torch.clip(mu_mRNA_discreteAlpha_OnePlate2(alpha_cg, beta, gamma, tau_cg, u0_g, s0_g, u_detection_factor_g), min = 10**(-5))
+
+def mu_mRNA_discreteAlpha_globalTime_twoStates_OnePlate_MultiLineage(alpha_ON, alpha_OFF, beta, gamma, T_c, T_gON, T_gOFF, Zeros):
+    '''Calculates expected value of spliced and unspliced counts as a function of rates,
+    global latent time, initial states and global switch times between two states'''
+    n_cells = T_c.shape[-2]
+    n_genes = alpha_ON.shape[-1]
+    n_lineages = T_gON.shape[-3]
+    tau = torch.clip(T_c - T_gON, min = 10**(-5))
+    t0 = T_gOFF - T_gON
+    # Transcription rate in each cell for each gene:
+    boolean = (tau < t0).reshape(n_lineages, n_cells, n_genes)
+    alpha_cg = alpha_ON*boolean + alpha_OFF*~boolean
+    # Time since changepoint for each cell and gene:
+    tau_cg = tau*boolean + (tau - t0)*~boolean
+    # Initial condition for each cell and gene:
+    initial_state = mu_mRNA_discreteAlpha_OnePlate_MultiLineage(alpha_ON, beta, gamma, t0, Zeros, Zeros)
+    u0_g = 10**(-5) + ~boolean*initial_state[:,:,:,0]
+    s0_g = 10**(-5) + ~boolean*initial_state[:,:,:,1]
+    # Unspliced and spliced count variance for each gene in each cell:
+    return torch.clip(mu_mRNA_discreteAlpha_OnePlate_MultiLineage(alpha_cg, beta, gamma, tau_cg, u0_g, s0_g), min = 10**(-5))
 
 def var_mRNA_discreteAlpha_globalTime_twoStates(alpha_ON, alpha_OFF, beta, gamma, T_c, T_gON, T_gOFF):
     '''Calculates expected value of spliced and unspliced counts as a function of rates,
