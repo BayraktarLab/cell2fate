@@ -2,7 +2,7 @@
 
 ## Usage and Tutorials
 
-A tutorial notebook is available [here](cell2fate/notebooks/cell2fate_tutorial_pancreas.ipynb)
+A tutorial notebook is available [here](https://github.com/AlexanderAivazidis/cell2fate/blob/main/notebooks/cell2fate_tutorial_pancreas.ipynb)
 
 ## Installation
 
