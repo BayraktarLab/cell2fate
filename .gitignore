@@ -1,4 +1,8 @@
-# DS_Store
+notebooks/data
+notebooks/data/*
+
+
+#DS_Store
 .DS_Store
 
 # Byte-compiled / optimized / DLL files
