@@ -8,13 +8,19 @@ A tutorial notebook is available [here](https://github.com/AlexanderAivazidis/ce
 
 We suggest using a separate conda environment for installing cell2fate.
 
-Create a conda environment and install the `cell2fate` package
+Create a conda environment and install the `cell2fate` package.
 
 ```bash
 conda create -y -n cell2fate_env python=3.9
 
 conda activate cell2fate_env
 pip install git+https://github.com/AlexanderAivazidis/cell2fate
+```
+
+cell2fate also needs cell2location installed:
+
+```bash
+pip install git+https://github.com/BayraktarLab/cell2location.git#egg=cell2location[tutorials]
 ```
 
 Finally, to use this environment in a jupyter notebook, add a jupyter kernel for this environment:
