@@ -16,15 +16,14 @@ from scvi.data.fields import (
 )
 from scvi.model.base import BaseModelClass, PyroSampleMixin, PyroSviTrainMixin
 from scvi.utils import setup_anndata_dsp
-import pyro.distributions as dist
-import torch
+from scipy.sparse import issparse
 
 from cell2fate._pyro_base_cell2fate_module import Cell2FateBaseModule
 from cell2fate._pyro_mixin import PltExportMixin, QuantileMixin
-from ._cell2fate_multiLineage_module_1 import DifferentiationModel_MultiLineage_DiscreteTwoStateTranscriptionRate
+from ._cell2fate_singleLineage_module_5 import DifferentiationModel_OneLineage_DiscreteTwoStateTranscriptionRate
 from cell2fate.utils import multiplot_from_generator
 
-class Cell2fate_MultiLineage(QuantileMixin, PyroSampleMixin, PyroSviTrainMixin, PltExportMixin, BaseModelClass):
+class Cell2fateModel(QuantileMixin, PyroSampleMixin, PyroSviTrainMixin, PltExportMixin, BaseModelClass):
     """
     Cell2fate model. User-end model class. See Module class for description of the model.
 
@@ -54,7 +53,10 @@ class Cell2fate_MultiLineage(QuantileMixin, PyroSampleMixin, PyroSviTrainMixin, 
         super().__init__(adata)
 
         if model_class is None:
-            model_class = DifferentiationModel_MultiLineage_DiscreteTwoStateTranscriptionRate
+            model_class = DifferentiationModel_OneLineage_DiscreteTwoStateTranscriptionRate
+
+        # use per class average as initial value
+#             model_kwargs["init_vals"] = {"per_cluster_mu_fg": aver.values.T.astype("float32") + 0.0001}
 
         self.module = Cell2FateBaseModule(
             model=model_class,
@@ -178,37 +180,12 @@ class Cell2fate_MultiLineage(QuantileMixin, PyroSampleMixin, PyroSviTrainMixin, 
         obs2sample = adata_manager.get_from_registry(REGISTRY_KEYS.BATCH_KEY)
         obs2sample = pd.get_dummies(obs2sample.flatten())
 
-        unspliced_corrected = adata_manager.get_from_registry('unspliced').toarray()/samples["detection_y_c"][:,:,0] - np.dot(obs2sample, samples["s_g_gene_add"])
+        unspliced_corrected = adata_manager.get_from_registry('unspliced')/samples["detection_y_cu"][0,:,:] - np.dot(obs2sample, samples["s_g_gene_add"][:,:,0])
         adata.layers['unspliced_norm'] = unspliced_corrected - unspliced_corrected.min()
-        spliced_corrected = adata_manager.get_from_registry('spliced').toarray()/samples["detection_y_c"][:,:,0] - np.dot(obs2sample, samples["s_g_gene_add"])
+        spliced_corrected = adata_manager.get_from_registry('spliced')/samples["detection_y_cs"][0,:,:] - np.dot(obs2sample, samples["s_g_gene_add"][:,:,1])
         adata.layers['spliced_norm'] = spliced_corrected - spliced_corrected.min()
 
         return adata
-    
-    def compute_lineage_probability(self, adata):
-        """
-        Assings lineage number and lineage probability to each cell in annData object based on posterior
-        of lineage specific mean and variance and using a GammaPoisson likelihood for spliced and unspliced counts.
-        Parameters
-        ----------
-        adata
-            anndata     
-        Returns
-        -------
-        """
-        alpha = self.samples['post_sample_means']['alpha']
-        mu = self.samples['post_sample_means']['mu']
-        logProb = dist.GammaPoisson(concentration= torch.tensor(alpha),
-                          rate= torch.tensor(alpha / mu)).log_prob(torch.stack([torch.tensor(self.adata_manager.get_from_registry('unspliced').toarray()),
-                                           torch.tensor(self.adata_manager.get_from_registry('spliced').toarray())], axis = 2))
-        classProbs = torch.sum(torch.sum(logProb, axis = -2), axis  = -1)
-        normConst = torch.logsumexp(classProbs, dim = 0)
-        classProbs = torch.exp(classProbs - normConst.unsqueeze(0))
-        predictClass = torch.argmax(classProbs, axis = 0)
-        adata.obs['Lineage Number'] = predictClass
-        adata.obs['Lineage Name'] = ['Lineage ' + str(int(x)) for x in predictClass]
-        for i in range(self.module.model.n_lineages):
-            adata.obs['Lineage Probability ' + str(i)] = classProbs[i,:]
 
     def export_posterior(
         self,
@@ -263,13 +240,13 @@ class Cell2fate_MultiLineage(QuantileMixin, PyroSampleMixin, PyroSviTrainMixin, 
         if sample_kwargs['return_samples']:
             print('Warning: Saving ALL posterior samples. Specify "return_samples: False" to save just summary statistics.')
             adata.uns[export_slot]['post_samples'] = self.samples['posterior_samples']
-        
+
         adata.obs['latent_time_mean'] = self.samples['post_sample_means']['T_c'].flatten()
         adata.obs['latent_time_sd'] = self.samples['post_sample_stds']['T_c'].flatten()
-#         adata.obs['normalization_factor_unspliced_mean'] = self.samples['post_sample_means']['detection_y_cu'].flatten()
-#         adata.obs['normalization_factor_unspliced_sd'] = self.samples['post_sample_stds']['detection_y_cu'].flatten()
-#         adata.obs['normalization_factor_spliced_mean'] = self.samples['post_sample_means']['detection_y_cs'].flatten()
-#         adata.obs['normalization_factor_spliced_sd'] = self.samples['post_sample_stds']['detection_y_cs'].flatten()
+        adata.obs['normalization_factor_unspliced_mean'] = self.samples['post_sample_means']['detection_y_cu'].flatten()
+        adata.obs['normalization_factor_unspliced_sd'] = self.samples['post_sample_stds']['detection_y_cu'].flatten()
+        adata.obs['normalization_factor_spliced_mean'] = self.samples['post_sample_means']['detection_y_cs'].flatten()
+        adata.obs['normalization_factor_spliced_sd'] = self.samples['post_sample_stds']['detection_y_cs'].flatten()
 
         adata.var['transcription_rate_mean'] = self.samples['post_sample_means']['alpha_g'].flatten()
         adata.var['transcription_rate_sd'] = self.samples['post_sample_stds']['alpha_g'].flatten()
@@ -277,48 +254,38 @@ class Cell2fate_MultiLineage(QuantileMixin, PyroSampleMixin, PyroSviTrainMixin, 
         adata.var['splicing_rate_sd'] = self.samples['post_sample_stds']['beta_g'].flatten()
         adata.var['degredation_rate_mean'] = self.samples['post_sample_means']['gamma_g'].flatten()
         adata.var['degredation_rate_sd'] = self.samples['post_sample_stds']['gamma_g'].flatten()
-        for i in range(self.module.model.n_lineages):
-            adata.var['switchON_time_' + str(i) + '_mean'] = self.samples['post_sample_means']['T_kgON'][i,:,:,:].flatten()
-            adata.var['switchON_time_'  + str(i) +  '_sd'] = self.samples['post_sample_stds']['T_kgON'][i,:,:,:].flatten()
-            adata.var['switchOFF_time_'  + str(i) + '_mean'] = self.samples['post_sample_means']['T_kgOFF'][i,:,:,:].flatten()
-            adata.var['switchOFF_time_' + str(i) + '_sd'] = self.samples['post_sample_stds']['T_kgOFF'][i,:,:,:].flatten()
-        
-        print('Computing lineage probabilities based on posterior of lineage specific mean and variance.')
-        self.compute_lineage_probability(adata)
-        
-        print('Computing RNAvelocity based on posterior of rates and latent time.')
-        lineage_n = np.array(adata.obs['Lineage Number'])
-        cell_n = torch.arange(self.module.model.n_obs)
+        adata.var['switchON_time_mean'] = self.samples['post_sample_means']['T_gON'].flatten()
+        adata.var['switchON_time_sd'] = self.samples['post_sample_stds']['T_gON'].flatten()
+        adata.var['switchOFF_time_mean'] = self.samples['post_sample_means']['T_gOFF'].flatten()
+        adata.var['switchOFF_time_sd'] = self.samples['post_sample_stds']['T_gOFF'].flatten()
+
         adata.layers['velocity'] = self.samples['post_sample_means']['beta_g'][...,0] * \
-        self.samples['post_sample_means']['mu_RNAvelocity'][lineage_n,cell_n,:,0] - \
-        self.samples['post_sample_means']['gamma_g'][...,0] * \
-        self.samples['post_sample_means']['mu_RNAvelocity'][lineage_n,cell_n,:,1]
+        self.samples['post_sample_means']['mu_RNAvelocity'][:,:,0] - \
+        self.samples['post_sample_means']['gamma_g'][...,0] * self.samples['post_sample_means']['mu_RNAvelocity'][:,:,1]
+        adata.layers['velocity_sd'] = np.sqrt((self.samples['post_sample_means']['beta_g'][...,0]**2 +
+                                               self.samples['post_sample_stds']['beta_g'][...,0]**2)*
+                                             (self.samples['post_sample_means']['mu_RNAvelocity'][:,:,0]**2 +
+                                              self.samples['post_sample_stds']['mu_RNAvelocity'][:,:,0]**2) -
+                                             (self.samples['post_sample_means']['beta_g'][...,0]**2*
+                                              self.samples['post_sample_means']['mu_RNAvelocity'][:,:,0]**2) +
+                                             (self.samples['post_sample_means']['gamma_g'][...,0]**2 +
+                                              self.samples['post_sample_stds']['gamma_g'][...,0]**2)*
+                                             (self.samples['post_sample_means']['mu_RNAvelocity'][:,:,1]**2 +
+                                              self.samples['post_sample_stds']['mu_RNAvelocity'][:,:,1]**2) -
+                                             (self.samples['post_sample_means']['gamma_g'][...,0]**2*
+                                              self.samples['post_sample_means']['mu_RNAvelocity'][:,:,1]**2))
         if sample_kwargs['return_samples'] and full_velocity_posterior == True:
             print('Warning: Saving ALL posterior samples for velocity in "adata.uns["velocity_posterior"]". \
             Specify "return_samples: False" or "full_velocity_posterior = False" to save just summary statistics.')
             adata.uns['velocity_posterior'] = self.samples['posterior_samples']['beta_g'][...,0] * \
-            np.swapaxes(self.samples['posterior_samples']['mu_RNAvelocity'][:,lineage_n,cell_n,:,0],0,1) - \
-            self.samples['posterior_samples']['gamma_g'][...,0] * \
-            np.swapaxes(self.samples['posterior_samples']['mu_RNAvelocity'][:,lineage_n,cell_n,:,1],0,1)
-        else:
-            adata.layers['velocity_sd'] = np.sqrt((self.samples['post_sample_means']['beta_g'][...,0]**2 +
-                                       self.samples['post_sample_stds']['beta_g'][...,0]**2)*
-                                     (self.samples['post_sample_means']['mu_RNAvelocity'][lineage_n,cell_n,:,0]**2 +
-                                      self.samples['post_sample_stds']['mu_RNAvelocity'][lineage_n,cell_n,:,0]**2) -
-                                     (self.samples['post_sample_means']['beta_g'][...,0]**2*
-                                      self.samples['post_sample_means']['mu_RNAvelocity'][lineage_n,cell_n,:,0]**2) +
-                                     (self.samples['post_sample_means']['gamma_g'][...,0]**2 +
-                                      self.samples['post_sample_stds']['gamma_g'][...,0]**2)*
-                                     (self.samples['post_sample_means']['mu_RNAvelocity'][lineage_n,cell_n,:,1]**2 +
-                                      self.samples['post_sample_stds']['mu_RNAvelocity'][lineage_n,cell_n,:,1]**2) -
-                                     (self.samples['post_sample_means']['gamma_g'][...,0]**2*
-                                      self.samples['post_sample_means']['mu_RNAvelocity'][lineage_n,cell_n,:,1]**2))
+            self.samples['posterior_samples']['mu_RNAvelocity'][...,0] - self.samples['posterior_samples']['gamma_g'][...,0] * \
+            self.samples['posterior_samples']['mu_RNAvelocity'][...,1]
+        
         if normalize:
             print('Computing normalized counts based on posterior of technical variables.')
             adata = self.normalize(self.samples['post_sample_means'], self.adata_manager, adata)
 
         return adata
-    
     def view_history(self):
         """
         View training history over various training windows to assess convergence or spot potential training problems.

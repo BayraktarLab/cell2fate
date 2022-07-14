@@ -1,8 +1,8 @@
 from scvi._compat import Literal
 from scvi.module.base import PyroBaseModuleClass
-from pyro.infer.autoguide import AutoHierarchicalNormalMessenger, AutoNormal
+from pyro.infer.autoguide import AutoHierarchicalNormalMessenger
 
-from cell2location.models.base._pyro_mixin import AutoGuideMixinModule, init_to_value
+from cell2fate._pyro_mixin import AutoGuideMixinModule, init_to_value
 
 class Cell2FateBaseModule(PyroBaseModuleClass, AutoGuideMixinModule):
     def __init__(

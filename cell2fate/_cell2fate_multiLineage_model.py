@@ -20,7 +20,7 @@ import pyro.distributions as dist
 import torch
 
 from cell2fate._pyro_base_cell2fate_module import Cell2FateBaseModule
-from cell2location.models.base._pyro_mixin import PltExportMixin, QuantileMixin
+from cell2fate._pyro_mixin import PltExportMixin, QuantileMixin
 from ._cell2fate_multiLineage_module_2 import DifferentiationModel_MultiLineage_DiscreteTwoStateTranscriptionRate
 from cell2fate.utils import multiplot_from_generator
 

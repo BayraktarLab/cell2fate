@@ -12,6 +12,60 @@ from numpy.linalg import norm
 from scipy.sparse import csr_matrix
 from numpy import inner
 import matplotlib.pyplot as plt
+from contextlib import contextmanager
+import seaborn as sns
+import os,sys
+
+@contextmanager
+def suppress_stdout():
+    with open(os.devnull, "w") as devnull:
+        old_stdout = sys.stdout
+        sys.stdout = devnull
+        try:  
+            yield
+        finally:
+            sys.stdout = old_stdout
+
+def test_differentiation_time(mod, clusters, origin_cluster, target_clusters):
+    with suppress_stdout():
+        T_c_posterior = mod.sample_posterior(**{'return_sites' : ['T_c'], 'num_samples' : 10, 'return_samples' : 'True',
+                                        'batch_size' : len(mod.samples['post_sample_means']['T_c'].flatten())})['posterior_samples']['T_c']
+        for i in range(2):
+            posterior = mod.sample_posterior(**{'return_sites' : ['T_c'], 'num_samples' : 10, 'return_samples' : 'True',
+                                            'batch_size' : len(mod.samples['post_sample_means']['T_c'].flatten())})
+            T_c_posterior = np.concatenate([T_c_posterior, posterior['posterior_samples']['T_c']])
+    i = 0
+    df_list = []
+    for i in range(len(target_clusters)):
+        df = pd.DataFrame(columns = ['T_c', 'cluster'])
+        cluster = target_clusters[i]
+        df['T_c'] = (T_c_posterior[:, clusters == cluster,...] - np.mean(T_c_posterior[:, clusters == origin_cluster,...])).flatten()
+        df['cluster'] = cluster
+        df_list += [df]
+    df = pd.concat(df_list)
+    
+    Means = df.groupby('cluster')['T_c'].mean()
+
+    p=sns.violinplot(x="cluster", y='T_c', data=df, palette="PRGn", inner = None)
+    # p = sns.stripplot(x="cluster", y='T_c', data=df, color = 'black', alpha = 0.1, size = 10)
+    sns.boxplot(showmeans=True,
+                meanline=True,
+                meanprops={'color': 'red', 'ls': '-', 'lw': 2},
+                medianprops={'visible': False},
+                whiskerprops={'visible': False},
+                zorder=10,
+                x="cluster",
+                y='T_c',
+                data=df,
+                showfliers=False,
+                showbox=False,
+                showcaps=False,
+                ax=p)
+    # plt.setp(ax.collections, alpha=0)
+    plt.scatter(x=range(len(Means)), y=Means,c="red")
+    plt.ylabel('Time (hours)')
+    plt.xticks(rotation=90)
+    plt.title('Posterior samples of differentiation time in each cell')
 
 def removeOutliers(adata, min_total, max_total, min_ratio, max_ratio, plot = True, remove = True):
     """
@@ -293,7 +347,7 @@ def add_prior_knowledge(adata, cluster_column, initial_stages = None, initial_st
     return adata
 
 def G_a(mu, sd):
-    # Converts mean and sd for Gamma distribution into alpha parameter
+    # Converts mean and sd for Gamma distribution into parameter
     return mu**2/sd**2
 
 def G_b(mu, sd):
@@ -387,16 +441,19 @@ def mu_mRNA_continuousAlpha(alpha, beta, gamma, tau, u0, s0, delta_alpha, lam):
 
     return torch.stack([mu_u, mu_s], axis = 2)
 
+def c(x, m = 10**(-100)):
+    return torch.clip(x, min = m)
+
 def mu_mRNA_continuousAlpha_withPlates(alpha, beta, gamma, tau, u0, s0, delta_alpha, lam):
     ''' Calculates expected value of spliced and unspliced counts as a function of rates, latent time, initial states,
     difference to transcription rate in previous state and rate of exponential change process between states.'''
     
-    mu_u = u0*torch.exp(-beta*tau) + (alpha/beta)* (1 - torch.exp(-beta*tau)) + delta_alpha/(beta-lam)*(torch.exp(-beta*tau) - torch.exp(-lam*tau))
+    mu_u = u0*torch.exp(-beta*tau) + (alpha/beta)* (1 - torch.exp(-beta*tau)) + delta_alpha/(beta-lam+10**(-5))*(torch.exp(-beta*tau) - torch.exp(-lam*tau))
     mu_s = (s0*torch.exp(-gamma*tau) + 
     alpha/gamma * (1 - torch.exp(-gamma*tau)) +
-    (alpha - beta * u0)/(gamma - beta + 10**(-5)) * (torch.exp(-gamma*tau) - torch.exp(-beta*tau)) +
-    (delta_alpha*beta)/((beta - lam + 10**(-5))*(gamma - beta + 10**(-5))) * (torch.exp(-beta*tau) - torch.exp(-gamma*tau))-
-    (delta_alpha*beta)/((beta - lam + 10**(-5))*(gamma - lam + 10**(-5))) * (torch.exp(-lam*tau) - torch.exp(-gamma*tau)))
+    (alpha - beta * u0)/(gamma - beta+10**(-5)) * (torch.exp(-gamma*tau) - torch.exp(-beta*tau)) +
+    (delta_alpha*beta)/((beta - lam+10**(-5))*(gamma - beta+10**(-5))) * (torch.exp(-beta*tau) - torch.exp(-gamma*tau))-
+    (delta_alpha*beta)/((beta - lam+10**(-5))*(gamma - lam+10**(-5))) * (torch.exp(-lam*tau) - torch.exp(-gamma*tau)))
 
     return torch.stack([mu_u, mu_s], axis = -1)
 
@@ -454,6 +511,26 @@ def mu_mRNA_discreteAlpha_globalTime_twoStates_OnePlate(alpha_ON, alpha_OFF, bet
     s0_g = 10**(-5) + ~boolean*initial_state[1,:,:]
     # Unspliced and spliced count variance for each gene in each cell:
     return torch.clip(mu_mRNA_discreteAlpha_OnePlate(alpha_cg, beta, gamma, tau_cg, u0_g, s0_g), min = 10**(-5))
+
+def mu_mRNA_continousAlpha_globalTime_twoStates_OnePlate(alpha_ON, alpha_OFF, beta, gamma, T_c, T_gON, T_gOFF, Zeros):
+    '''Calculates expected value of spliced and unspliced counts as a function of rates,
+    global latent time, initial states and global switch times between two states'''
+    n_cells = T_c.shape[-2]
+    n_genes = alpha_ON.shape[-1]
+    tau = torch.clip(T_c - T_gON, min = 10**(-5))
+    t0 = T_gOFF - T_gON
+    # Transcription rate in each cell for each gene:
+    boolean = (tau < t0).reshape(n_cells, n_genes)
+    alpha_cg = alpha_ON*boolean + alpha_OFF*~boolean
+    # Time since changepoint for each cell and gene:
+    tau_cg = tau*boolean + (tau - t0)*~boolean
+    # Initial condition for each cell and gene:
+    initial_state = mu_mRNA_discreteAlpha_OnePlate2(alpha_ON, beta, gamma, t0, Zeros, Zeros)
+    u0_g = 10**(-5) + ~boolean*initial_state[:,:,0]
+    s0_g = 10**(-5) + ~boolean*initial_state[:,:,1]
+    # Unspliced and spliced count variance for each gene in each cell:
+    return torch.clip(mu_mRNA_discreteAlpha_OnePlate2(alpha_cg, beta, gamma, tau_cg, u0_g, s0_g), min = 10**(-5))
+
 
 def mu_mRNA_discreteAlpha_globalTime_twoStates_OnePlate2(alpha_ON, alpha_OFF, beta, gamma, T_c, T_gON, T_gOFF, Zeros):
     '''Calculates expected value of spliced and unspliced counts as a function of rates,
@@ -674,6 +751,33 @@ def mu_mRNA_continuousAlpha_globalTime_transcriptionalModules_withPlates(alpha_m
     # Also calculate transcription rate:
     alpha_cg = mu_alpha(alpha_pg[P_c,:], A_pg[P_c,:], tau_c.reshape(n_cells,1), lam)
     return torch.clip(mu_cg, min = 10**(-5)), alpha_cg
+
+def mu_mRNA_continousAlpha_globalTime_twoStates_OnePlate2(alpha_ON, alpha_OFF, beta, gamma, lam_gi, T_c, T_gON, T_gOFF, Zeros):
+    '''Calculates expected value of spliced and unspliced counts as a function of rates,
+    global latent time, initial states and global switch times between two states'''
+    n_cells = T_c.shape[-2]
+    n_genes = alpha_ON.shape[-1]
+    tau = torch.clip(T_c - T_gON, min = 10**(-5))
+    t0 = T_gOFF - T_gON
+    # Transcription rate in each cell for each gene:
+    boolean = (tau < t0).reshape(n_cells, n_genes)
+    alpha_cg = alpha_ON*boolean + alpha_OFF*~boolean
+    # Time since changepoint for each cell and gene:
+    tau_cg = tau*boolean + (tau - t0)*~boolean
+    # Initial condition for each cell and gene:
+    lam_g = ~boolean*lam_gi[:,1] + boolean*lam_gi[:,0]
+    initial_state = mu_mRNA_continuousAlpha_withPlates(alpha_ON, beta, gamma, t0,
+                                                       Zeros, Zeros, alpha_ON-alpha_OFF, lam_gi[:,0])
+    initial_alpha = mu_alpha(alpha_ON, alpha_OFF, t0, lam_gi[:,0])
+    u0_g = 10**(-5) + ~boolean*initial_state[:,:,0]
+    s0_g = 10**(-5) + ~boolean*initial_state[:,:,1]
+    delta_alpha = ~boolean*initial_alpha*(-1) + boolean*alpha_ON*(1)
+    alpha_0 = alpha_OFF + ~boolean*initial_alpha
+    # Unspliced and spliced count variance for each gene in each cell:
+    mu_RNAvelocity = torch.clip(mu_mRNA_continuousAlpha_withPlates(alpha_cg, beta, gamma, tau_cg,
+                                                         u0_g, s0_g, delta_alpha, lam_g), min = 10**(-5))
+#     mu_Alpha = mu_alpha(alpha_cg, alpha_0, tau_cg,lam_g)
+    return mu_RNAvelocity
 
 def mu_mRNA_discreteAlpha_withLineages(alpha, beta, gamma, tau, u0, s0):
     '''Calculates expected value of spliced and unspliced counts as a function of rates,

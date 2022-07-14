@@ -19,8 +19,8 @@ from scvi.utils import setup_anndata_dsp
 from scipy.sparse import issparse
 
 from cell2fate._pyro_base_cell2fate_module import Cell2FateBaseModule
-from cell2location.models.base._pyro_mixin import PltExportMixin, QuantileMixin
-from ._cell2fate_singleLineage_module_2 import DifferentiationModel_OneLineage_DiscreteTwoStateTranscriptionRate
+from cell2fate._pyro_mixin import PltExportMixin, QuantileMixin
+from ._cell2fate_singleLineage_module_3 import DifferentiationModel_OneLineage_DiscreteTwoStateTranscriptionRate
 from cell2fate.utils import multiplot_from_generator
 
 class Cell2fate_SingleLineage(QuantileMixin, PyroSampleMixin, PyroSviTrainMixin, PltExportMixin, BaseModelClass):

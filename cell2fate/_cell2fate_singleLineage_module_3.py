@@ -8,7 +8,7 @@ from pyro.nn import PyroModule
 from scvi import REGISTRY_KEYS
 import pandas as pd
 from scvi.nn import one_hot
-from cell2fate.utils import G_a, G_b, mu_mRNA_discreteAlpha_globalTime_twoStates_OnePlate2
+from cell2fate.utils import G_a, G_b, mu_mRNA_continousAlpha_globalTime_twoStates_OnePlate2
 
 class DifferentiationModel_OneLineage_DiscreteTwoStateTranscriptionRate(PyroModule):
     r"""
@@ -29,7 +29,7 @@ class DifferentiationModel_OneLineage_DiscreteTwoStateTranscriptionRate(PyroModu
         n_vars,
         n_batch,
         n_extra_categoricals=None,
-        detection_alpha=1,
+        detection_alpha=200.,
         alpha_g_phi_hyp_prior={"alpha": 9.0, "beta": 3.0},
         gene_add_alpha_hyp_prior={"alpha": 9.0, "beta": 3.0},
         gene_add_mean_hyp_prior={
@@ -39,16 +39,18 @@ class DifferentiationModel_OneLineage_DiscreteTwoStateTranscriptionRate(PyroModu
         detection_hyp_prior={"mean_alpha": 1.0, "mean_beta": 1.0},
         transcription_rate_hyp_prior={"mean_hyp_prior_mean": 1.0, "mean_hyp_prior_sd": 0.5,
                                      "sd_hyp_prior_mean": 1.0, "sd_hyp_prior_sd": 0.5},
-        splicing_rate_hyp_prior={"mean_hyp_prior_mean": 0.05, "mean_hyp_prior_sd": 0.025,
-                                 "sd_hyp_prior_mean": 0.025, "sd_hyp_prior_sd": 0.0125},
+        splicing_rate_hyp_prior={"mean_hyp_prior_mean": 1.0, "mean_hyp_prior_sd": 0.5,
+                                 "sd_hyp_prior_mean": 0.5, "sd_hyp_prior_sd": 0.25},
         degredation_rate_hyp_prior={"mean_hyp_prior_mean": 0.2, "mean_hyp_prior_sd": 0.1,
                                     "sd_hyp_prior_mean": 0.1, "sd_hyp_prior_sd": 0.05},
-        s_overdispersion_factor_hyp_prior={'alpha_mean': 10., 'beta_mean': 1.,
-                                           'alpha_sd': 1., 'beta_sd': 0.1},
-        u_detection_factor_mean_cv = 0.1,
-        u_detection_factor_g_cv = 0.05,
-        u_ambient_factor_mean_cv = 0.1,
-        u_ambient_factor_g_cv = 0.1, 
+        activation_rate_hyp_prior={"mean_hyp_prior_mean": 1, "mean_hyp_prior_sd": 0.1,
+                                    "sd_hyp_prior_mean": 0.1, "sd_hyp_prior_sd": 0.05},
+        s_overdispersion_factor_hyp_prior={'alpha_mean': 1000, 'beta_mean': 0.1,
+                                           'alpha_sd': 0.1, 'beta_sd': 0.0001},
+        u_detection_factor_mean_cv = 0.0000001,
+        u_detection_factor_g_cv = 0.000005,
+        u_ambient_factor_mean_cv = 0.00001,
+        u_ambient_factor_g_cv = 0.00001, 
         Tmax_prior={"mean": 50, "sd": 50},
         gene_tech_prior={"mean": 1, "alpha": 200},
         init_vals: Optional[dict] = None,
@@ -233,6 +235,24 @@ class DifferentiationModel_OneLineage_DiscreteTwoStateTranscriptionRate(PyroModu
             torch.tensor(self.degredation_rate_hyp_prior["sd_hyp_prior_sd"]),
         )
         
+        # Register parameters for activation rate hyperprior:
+        self.register_buffer(
+            "activation_rate_mean_hyp_prior_mean",
+            torch.tensor(activation_rate_hyp_prior["mean_hyp_prior_mean"]),
+        )        
+        self.register_buffer(
+            "activation_rate_mean_hyp_prior_sd",
+            torch.tensor(activation_rate_hyp_prior["mean_hyp_prior_sd"]),
+        )
+        self.register_buffer(
+            "activation_rate_sd_hyp_prior_mean",
+            torch.tensor(activation_rate_hyp_prior["sd_hyp_prior_mean"]),
+        )
+        self.register_buffer(
+            "activation_rate_sd_hyp_prior_sd",
+            torch.tensor(activation_rate_hyp_prior["sd_hyp_prior_sd"]),
+        )
+        
         # Register parameters for maximum time:
         self.register_buffer(
             "Tmax_mean",
@@ -297,7 +317,7 @@ class DifferentiationModel_OneLineage_DiscreteTwoStateTranscriptionRate(PyroModu
         alpha_sd = pyro.sample('alpha_sd',
                    dist.Gamma(G_a(self.transcription_rate_sd_hyp_prior_mean, self.transcription_rate_sd_hyp_prior_sd),
                               G_b(self.transcription_rate_sd_hyp_prior_mean, self.transcription_rate_sd_hyp_prior_sd)))
-        alpha_ONg = pyro.sample('alpha_g', dist.Gamma(alpha_mu, alpha_sd).expand([1, self.n_vars, 1]).to_event(3))
+        alpha_ONg = pyro.sample('alpha_g', dist.Gamma(G_a(alpha_mu, alpha_sd), G_b(alpha_mu, alpha_sd)).expand([1, self.n_vars, 1]).to_event(3))
         alpha_OFFg = self.alpha_OFFg
         # Splicing rate:
         beta_mu = pyro.sample('beta_mu',
@@ -315,6 +335,15 @@ class DifferentiationModel_OneLineage_DiscreteTwoStateTranscriptionRate(PyroModu
                    dist.Gamma(G_a(self.degredation_rate_sd_hyp_prior_mean, self.degredation_rate_sd_hyp_prior_sd),
                               G_b(self.degredation_rate_sd_hyp_prior_mean, self.degredation_rate_sd_hyp_prior_sd)))
         gamma_g = pyro.sample('gamma_g', dist.Gamma(G_a(gamma_mu, gamma_sd), G_b(gamma_mu, gamma_sd)).expand([1, self.n_vars,1]).to_event(3))
+        # Activation and Deactivation rate:
+        lam_mu = pyro.sample('lam_mu', dist.Gamma(G_a(self.activation_rate_mean_hyp_prior_mean, self.activation_rate_mean_hyp_prior_sd),
+                                            G_b(self.activation_rate_mean_hyp_prior_mean, self.activation_rate_mean_hyp_prior_sd)))
+        lam_sd = pyro.sample('lam_sd', dist.Gamma(G_a(self.activation_rate_sd_hyp_prior_mean, self.activation_rate_sd_hyp_prior_sd),
+                                            G_b(self.activation_rate_sd_hyp_prior_mean, self.activation_rate_sd_hyp_prior_sd)))
+        lam_g_mu = pyro.sample('lam_g_mu', dist.Gamma(G_a(lam_mu, lam_sd),
+                                            G_b(lam_mu, lam_sd)).expand([self.n_vars, 1]).to_event(2))
+        lam_gi = pyro.sample('lam_gi', dist.Gamma(G_a(lam_g_mu, lam_g_mu*0.1),
+                                            G_b(lam_g_mu, lam_g_mu*0.1)).expand([self.n_vars, 2]).to_event(2))
 
         # =====================Time======================= #
         # Global time for each cell:
@@ -330,9 +359,7 @@ class DifferentiationModel_OneLineage_DiscreteTwoStateTranscriptionRate(PyroModu
         T_gOFF = pyro.deterministic('T_gOFF', T_gON + t_gOFF*(T_max*self.one_point_one - T_gON))
 
         # =========== Mean expression based on dynamical equations ======================= #
-        mu_RNAvelocity =  pyro.deterministic('mu_RNAvelocity',
-                          mu_mRNA_discreteAlpha_globalTime_twoStates_OnePlate2(alpha_ONg[:,:,0], alpha_OFFg, beta_g[:,:,0], gamma_g[:,:,0],
-                          T_c[:,:,0], T_gON[:,:,0], T_gOFF[:,:,0], self.zeros))         
+        mu_RNAvelocity =  pyro.deterministic('mu_RNAvelocity', mu_mRNA_continousAlpha_globalTime_twoStates_OnePlate2(alpha_ONg[:,:,0], alpha_OFFg, beta_g[:,:,0], gamma_g[:,:,0], lam_gi, T_c[:,:,0], T_gON[:,:,0], T_gOFF[:,:,0], self.zeros))         
         
         # =============Detection efficiency of spliced and unspliced counts =============== #
         # Spliced counts cell specific relative detection efficiency with hierarchical prior across batches:
@@ -418,6 +445,7 @@ class DifferentiationModel_OneLineage_DiscreteTwoStateTranscriptionRate(PyroModu
             "alpha_gs_inverse", alpha_gu_inverse * s_overdispersion_factor_g)
 
         # =====================Expected expression ======================= #
+        # (Clipping for numerical stability)
         # overdispersion
         alpha = self.ones / torch.concat([alpha_gu_inverse, alpha_gs_inverse], axis = -1).pow(2)
         # observed expression includes technical factors:
