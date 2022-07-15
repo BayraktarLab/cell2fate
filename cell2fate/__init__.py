@@ -4,6 +4,9 @@ import logging
 
 from rich.console import Console
 from rich.logging import RichHandler
+from pyro.distributions import constraints
+from pyro.distributions.transforms import SoftplusTransform
+from torch.distributions import biject_to, transform_to
 
 from ._cell2fate_multiLineage_model_2 import Cell2fateModel
 from ._cell2fate_singleLineage_model import Cell2fate_SingleLineage
@@ -35,3 +38,8 @@ logger.addHandler(ch)
 logger.propagate = False
 
 __all__ = ["Cell2fate"]
+
+@biject_to.register(constraints.positive)
+@transform_to.register(constraints.positive)
+def _transform_to_positive(constraint):
+    return SoftplusTransform()

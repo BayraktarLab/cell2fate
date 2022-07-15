@@ -17,13 +17,7 @@ conda activate cell2fate_env
 pip install git+https://github.com/AlexanderAivazidis/cell2fate
 ```
 
-cell2fate also needs cell2location installed:
-
-```bash
-pip install git+https://github.com/BayraktarLab/cell2location.git#egg=cell2location[tutorials]
-```
-
-Finally, to use this environment in a jupyter notebook, add a jupyter kernel for this environment:
+To use this environment in a jupyter notebook, add a jupyter kernel for this environment:
 
 ```bash
 conda activate cell2fate_env
