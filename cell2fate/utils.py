@@ -172,7 +172,7 @@ def compute_velocity_graph_Bergen2020(adata, n_neighbours = None, full_posterior
     M = len(adata.obs_names)
     if not n_neighbours:
         n_neighbours = int(np.round(M*0.05, 0))
-    sc.pp.neighbors(adata, n_neighbors = n_neighbours)
+    scv.pp.neighbors(adata, n_neighbors = n_neighbours)
     adata.obsp['binary'] = adata.obsp['connectivities'] != 0
     distances = []
     velocities = []
@@ -201,8 +201,8 @@ def compute_velocity_graph_Bergen2020(adata, n_neighbours = None, full_posterior
                                    shape=(M, M))]
     return sum(matrices)
 
-def plot_velocity_umap_Bergen2020(adata, use_full_posterior = True,
-                                  plotting_kwargs: Optional[dict] = None):
+def plot_velocity_umap_Bergen2020(adata, use_full_posterior = True, n_neighbours = None,
+                                  plotting_kwargs: Optional[dict] = None, save = False):
     """
     Visualizes RNAvelocity with arrows on a UMAP, using the method introduced in 
     "Bergen et al. (2020), Generalizing RNA velocity to transient cell states through dynamical modeling"
@@ -230,15 +230,15 @@ def plot_velocity_umap_Bergen2020(adata, use_full_posterior = True,
     else:
         if use_full_posterior and 'velocity_posterior' in adata.uns.keys():
             print('Using full velocity posterior to calculate velocity graph')
-            adata.uns['velocity_graph'] = compute_velocity_graph_Bergen2020(adata, full_posterior = True)          
+            adata.uns['velocity_graph'] = compute_velocity_graph_Bergen2020(adata, full_posterior = True, n_neighbours = n_neighbours)          
         elif use_full_posterior and 'velocity_posterior' not in adata.uns.keys():
             print('Full velocity posterior not found, using expectation value to calculate velocity graph')
-            adata.uns['velocity_graph'] = compute_velocity_graph_Bergen2020(adata, full_posterior = False)
+            adata.uns['velocity_graph'] = compute_velocity_graph_Bergen2020(adata, full_posterior = False, n_neighbours = n_neighbours)
         elif not use_full_posterior:
             print('Using velocity expectation value to calculate velocity graph.')
-            adata.uns['velocity_graph'] = compute_velocity_graph_Bergen2020(adata, full_posterior = False)
+            adata.uns['velocity_graph'] = compute_velocity_graph_Bergen2020(adata, full_posterior = False, n_neighbours = n_neighbours)
         
-        scv.pl.velocity_embedding_stream(adata, basis='umap', **plotting_kwargs)
+        scv.pl.velocity_embedding_stream(adata, basis='umap', save = save, **plotting_kwargs)
 
 def get_training_data(adata, remove_clusters = None, cells_per_cluster = 100,
                          cluster_column = 'clusters', min_shared_counts = 10, n_var_genes = 2000):

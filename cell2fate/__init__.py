@@ -8,7 +8,6 @@ from pyro.distributions import constraints
 from pyro.distributions.transforms import SoftplusTransform
 from torch.distributions import biject_to, transform_to
 
-from ._cell2fate_multiLineage_model_2 import Cell2fateModel
 from ._cell2fate_singleLineage_model import Cell2fate_SingleLineage
 
 # https://github.com/python-poetry/poetry/pull/2366#issuecomment-652418094

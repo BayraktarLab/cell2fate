@@ -17,10 +17,8 @@ from scvi.data.fields import (
 from scvi.model.base import BaseModelClass, PyroSampleMixin, PyroSviTrainMixin
 from scvi.utils import setup_anndata_dsp
 from scipy.sparse import issparse
-
 from cell2fate._pyro_base_cell2fate_module import Cell2FateBaseModule
 from cell2fate._pyro_mixin import PltExportMixin, QuantileMixin
-from ._cell2fate_singleLineage_module_3 import DifferentiationModel_OneLineage_DiscreteTwoStateTranscriptionRate
 from cell2fate.utils import multiplot_from_generator
 
 class Cell2fate_SingleLineage(QuantileMixin, PyroSampleMixin, PyroSviTrainMixin, PltExportMixin, BaseModelClass):
@@ -51,9 +49,6 @@ class Cell2fate_SingleLineage(QuantileMixin, PyroSampleMixin, PyroSviTrainMixin,
         clear_param_store()
 
         super().__init__(adata)
-
-        if model_class is None:
-            model_class = DifferentiationModel_OneLineage_DiscreteTwoStateTranscriptionRate
 
         # use per class average as initial value
 #             model_kwargs["init_vals"] = {"per_cluster_mu_fg": aver.values.T.astype("float32") + 0.0001}
@@ -242,6 +237,7 @@ class Cell2fate_SingleLineage(QuantileMixin, PyroSampleMixin, PyroSviTrainMixin,
             adata.uns[export_slot]['post_samples'] = self.samples['posterior_samples']
 
         adata.obs['latent_time_mean'] = self.samples['post_sample_means']['T_c'].flatten()
+        adata.obs['latent_time_mean'] = adata.obs['latent_time_mean'] - np.min(adata.obs['latent_time_mean'])
         adata.obs['latent_time_sd'] = self.samples['post_sample_stds']['T_c'].flatten()
         adata.obs['normalization_factor_unspliced_mean'] = self.samples['post_sample_means']['detection_y_cu'].flatten()
         adata.obs['normalization_factor_unspliced_sd'] = self.samples['post_sample_stds']['detection_y_cu'].flatten()
