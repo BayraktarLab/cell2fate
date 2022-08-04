@@ -42,7 +42,7 @@ class Cell2FateBaseModule(PyroBaseModuleClass, AutoGuideMixinModule):
             data_transform=data_transform,
             encoder_mode=encoder_mode,
             init_loc_fn=self.init_to_value,
-            guide_class=AutoNormal,
+            guide_class=AutoHierarchicalNormalMessenger,
             n_cat_list=[kwargs["n_batch"]],
         )
 
