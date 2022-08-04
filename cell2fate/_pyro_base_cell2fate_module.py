@@ -1,6 +1,6 @@
 from scvi._compat import Literal
 from scvi.module.base import PyroBaseModuleClass
-from pyro.infer.autoguide import AutoHierarchicalNormalMessenger
+from pyro.infer.autoguide import AutoNormal, AutoHierarchicalNormalMessenger
 
 from cell2fate._pyro_mixin import AutoGuideMixinModule, init_to_value
 
@@ -42,7 +42,7 @@ class Cell2FateBaseModule(PyroBaseModuleClass, AutoGuideMixinModule):
             data_transform=data_transform,
             encoder_mode=encoder_mode,
             init_loc_fn=self.init_to_value,
-            guide_class=AutoHierarchicalNormalMessenger,
+            guide_class=AutoNormal,
             n_cat_list=[kwargs["n_batch"]],
         )
 

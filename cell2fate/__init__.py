@@ -9,6 +9,7 @@ from pyro.distributions.transforms import SoftplusTransform
 from torch.distributions import biject_to, transform_to
 
 from ._cell2fate_singleLineage_model import Cell2fate_SingleLineage
+from ._cell2fate_ModularTranscriptionRate_model_FixedModules_LocalTime import Cell2fate_ModularTranscriptionRate_FixedModules_LocalTime
 
 # https://github.com/python-poetry/poetry/pull/2366#issuecomment-652418094
 # https://github.com/python-poetry/poetry/issues/144#issuecomment-623927302

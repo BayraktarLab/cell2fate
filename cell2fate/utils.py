@@ -150,7 +150,7 @@ def multiplot_from_generator(g, num_columns, figsize_for_one_row=None, row_size 
         except StopIteration:
             pass
 
-def compute_velocity_graph_Bergen2020(adata, n_neighbours = None, full_posterior = True):
+def compute_velocity_graph_Bergen2020(adata, n_neighbours = None, full_posterior = True, spliced_key = 'Ms'):
     """
     Computes a "velocity graph" similar to the method in:
     "Bergen et al. (2020), Generalizing RNA velocity to transient cell states through dynamical modeling"
@@ -181,7 +181,7 @@ def compute_velocity_graph_Bergen2020(adata, n_neighbours = None, full_posterior
     matrices = []
     if full_posterior:
         for i in range(M):
-            distances += [adata.layers['spliced_norm'][adata.obsp['binary'].toarray()[i,:],:] - adata.layers['spliced_norm'][i,:].flatten()]
+            distances += [adata.layers[spliced_key][adata.obsp['binary'].toarray()[i,:],:] - adata.layers[spliced_key][i,:].flatten()]
             velocities += [adata.uns['velocity_posterior'][:,i,:]]
             cosines += [inner(distances[i], velocities[i])/(norm(distances[i])*norm(velocities[i]))]
             transition_probabilities += [np.exp(2*cosines[i])]
@@ -191,7 +191,7 @@ def compute_velocity_graph_Bergen2020(adata, n_neighbours = None, full_posterior
                                    shape=(M, M))]
     else:
         for i in range(M):
-            distances += [adata.layers['spliced_norm'][adata.obsp['binary'].toarray()[i,:],:] - adata.layers['spliced_norm'][i,:].flatten()]
+            distances += [adata.layers[spliced_key][adata.obsp['binary'].toarray()[i,:],:] - adata.layers[spliced_key][i,:].flatten()]
             velocities += [adata.layers['velocity'][i,:].reshape(1,len(adata.var_names))]
             cosines += [inner(distances[i], velocities[i])/(norm(distances[i])*norm(velocities[i]))]
             transition_probabilities += [np.exp(2*cosines[i])]
@@ -202,7 +202,7 @@ def compute_velocity_graph_Bergen2020(adata, n_neighbours = None, full_posterior
     return sum(matrices)
 
 def plot_velocity_umap_Bergen2020(adata, use_full_posterior = True, n_neighbours = None,
-                                  plotting_kwargs: Optional[dict] = None, save = False):
+                                  plotting_kwargs = None, save = False, spliced_key = 'Ms'):
     """
     Visualizes RNAvelocity with arrows on a UMAP, using the method introduced in 
     "Bergen et al. (2020), Generalizing RNA velocity to transient cell states through dynamical modeling"
@@ -230,18 +230,28 @@ def plot_velocity_umap_Bergen2020(adata, use_full_posterior = True, n_neighbours
     else:
         if use_full_posterior and 'velocity_posterior' in adata.uns.keys():
             print('Using full velocity posterior to calculate velocity graph')
-            adata.uns['velocity_graph'] = compute_velocity_graph_Bergen2020(adata, full_posterior = True, n_neighbours = n_neighbours)          
+            adata.uns['velocity_graph'] = compute_velocity_graph_Bergen2020(adata,
+                                                                            full_posterior = True,
+                                                                            n_neighbours = n_neighbours,
+                                                                            spliced_key = spliced_key)          
         elif use_full_posterior and 'velocity_posterior' not in adata.uns.keys():
             print('Full velocity posterior not found, using expectation value to calculate velocity graph')
-            adata.uns['velocity_graph'] = compute_velocity_graph_Bergen2020(adata, full_posterior = False, n_neighbours = n_neighbours)
+            adata.uns['velocity_graph'] = compute_velocity_graph_Bergen2020(adata,
+                                                                            full_posterior = False,
+                                                                            n_neighbours = n_neighbours,
+                                                                            spliced_key = spliced_key)
         elif not use_full_posterior:
             print('Using velocity expectation value to calculate velocity graph.')
-            adata.uns['velocity_graph'] = compute_velocity_graph_Bergen2020(adata, full_posterior = False, n_neighbours = n_neighbours)
+            adata.uns['velocity_graph'] = compute_velocity_graph_Bergen2020(adata,
+                                                                            full_posterior = False,
+                                                                            n_neighbours = n_neighbours,
+                                                                            spliced_key = spliced_key)
         
         scv.pl.velocity_embedding_stream(adata, basis='umap', save = save, **plotting_kwargs)
 
-def get_training_data(adata, remove_clusters = None, cells_per_cluster = 100,
-                         cluster_column = 'clusters', min_shared_counts = 10, n_var_genes = 2000):
+def get_training_data(adata, remove_clusters = None, cells_per_cluster = 100000,
+                         cluster_column = 'clusters', min_shared_counts = 20, n_var_genes = 2000,
+                         n_pcs=30, n_neighbors=30):
     """
     Reduces and anndata object to the most relevant cells and genes for understanding the differentiation trajectories
     in the data.
@@ -270,6 +280,7 @@ def get_training_data(adata, remove_clusters = None, cells_per_cluster = 100,
     adata = adata[[c not in remove_clusters for c in adata.obs[cluster_column]], :]
     # Restrict samples per cell type:
     N = cells_per_cluster
+    print('Keeping at most ' + str(N) + ' cells per cluster')
     unique_celltypes = np.unique(adata.obs[cluster_column])
     index = []
     for i in range(len(unique_celltypes)):
@@ -280,10 +291,11 @@ def get_training_data(adata, remove_clusters = None, cells_per_cluster = 100,
             subset = np.where(adata.obs[cluster_column] == unique_celltypes[i])[0]
         index += list(subset)
     adata = adata[index,:]
-    print('Keeping at most ' + str(N) + ' cells per cluster')
-    scv.pp.filter_genes(adata, min_shared_counts=min_shared_counts)
-    sc.pp.normalize_total(adata, target_sum=1e4)
-    scv.pp.filter_genes_dispersion(adata, n_top_genes=n_var_genes)
+    print("Saving raw counts in adata.layers['spliced_raw'] and adata.layers['unspliced_raw']")
+    adata.layers['spliced_raw'] = adata.layers['spliced']
+    adata.layers['unspliced_raw'] = adata.layers['unspliced']
+    scv.pp.filter_and_normalize(adata, min_shared_counts=min_shared_counts, n_top_genes=n_var_genes)
+    scv.pp.moments(adata, n_pcs=30, n_neighbors=30)
     return adata
 
 def add_prior_knowledge(adata, cluster_column, initial_stages = None, initial_stages_lineage = None,
@@ -752,6 +764,32 @@ def mu_mRNA_continuousAlpha_globalTime_transcriptionalModules_withPlates(alpha_m
     alpha_cg = mu_alpha(alpha_pg[P_c,:], A_pg[P_c,:], tau_c.reshape(n_cells,1), lam)
     return torch.clip(mu_cg, min = 10**(-5)), alpha_cg
 
+def mu_mRNA_continousAlpha_localTime_twoStates_OnePlate(alpha_ON, alpha_OFF, beta, gamma, lam_gi, T_cg, T_gOFF, Zeros):
+    '''Calculates expected value of spliced and unspliced counts as a function of rates,
+    global latent time, initial states and global switch times between two states'''
+    n_cells = T_cg.shape[-2]
+    n_genes = alpha_ON.shape[-1]
+    tau = T_cg
+    t0 = T_gOFF
+    # Transcription rate in each cell for each gene:
+    boolean = (tau < t0).reshape(n_cells, n_genes)
+    alpha_cg = alpha_ON*boolean + alpha_OFF*~boolean
+    # Time since changepoint for each cell and gene:
+    tau_cg = tau*boolean + (tau - t0)*~boolean
+    # Initial condition for each cell and gene:
+    lam_g = ~boolean*lam_gi[:,1] + boolean*lam_gi[:,0]
+    initial_state = mu_mRNA_continuousAlpha_withPlates(alpha_ON, beta, gamma, t0,
+                                                       Zeros, Zeros, alpha_ON-alpha_OFF, lam_gi[:,0])
+    initial_alpha = mu_alpha(alpha_ON, alpha_OFF, t0, lam_gi[:,0])
+    u0_g = 10**(-5) + ~boolean*initial_state[:,:,0]
+    s0_g = 10**(-5) + ~boolean*initial_state[:,:,1]
+    delta_alpha = ~boolean*initial_alpha*(-1) + boolean*alpha_ON*(1)
+    alpha_0 = alpha_OFF + ~boolean*initial_alpha
+    # Unspliced and spliced count variance for each gene in each cell:
+    mu_RNAvelocity = torch.clip(mu_mRNA_continuousAlpha_withPlates(alpha_cg, beta, gamma, tau_cg,
+                                                         u0_g, s0_g, delta_alpha, lam_g), min = 10**(-5))
+    return mu_RNAvelocity
+
 def mu_mRNA_continousAlpha_globalTime_twoStates_OnePlate2(alpha_ON, alpha_OFF, beta, gamma, lam_gi, T_c, T_gON, T_gOFF, Zeros):
     '''Calculates expected value of spliced and unspliced counts as a function of rates,
     global latent time, initial states and global switch times between two states'''
@@ -808,3 +846,81 @@ def mu_mRNA_discreteAlpha_globalTime_twoStates_withLineages(alpha_ON, alpha_OFF,
     s0_g = 10**(-3) + ~boolean*initial_state[...,1:2,:,:]
     # Unspliced and spliced counts for each gene in each cell:
     return torch.clip(mu_mRNA_discreteAlpha_withLineages(alpha_cg, beta, gamma, tau_cg, u0_g, s0_g), min = 10**(-3))
+
+def mu_mRNA_discreteAlpha_withPlates(alpha, beta, gamma, tau, u0, s0):
+    '''Calculates expected value of spliced and unspliced counts as a function of rates,
+    latent time and initial states'''
+    
+    mu_u = u0*torch.exp(-beta*tau) + (alpha/beta)* (1 - torch.exp(-beta*tau))
+    mu_s = (s0*torch.exp(-gamma*tau) + 
+    alpha/gamma * (1 - torch.exp(-gamma*tau)) +
+    (alpha - beta * u0)/(gamma - beta + 10**(-5)) * (torch.exp(-gamma*tau) - torch.exp(-beta*tau)))
+
+    return torch.stack([mu_u, mu_s], axis = -1)
+
+def mu_mRNA_discreteModularAlpha_localTime(
+    A_mgON, A_mgOFF, beta_g, gamma_g, T_cm, T_mOFF, lam, Zeros):    
+    '''Calculates expected value of spliced and unspliced counts summed over multiple modules.
+    Needs rates, local latent time, module activation rate and steady-state transcription rate.'''
+    n_cells = T_cm.shape[-3]
+    n_modules = A_mgON.shape[-2]
+    n_genes = A_mgON.shape[-1]
+    
+    # Time since switching on (clipped to positive values):
+    tau_cm = T_cm
+    # Switch off point:
+    t0_m = T_mOFF
+    # Module state in each cell and transition:
+    boolean_cm = (tau_cm < t0_m).reshape(n_cells, n_modules)
+    # Sum over modules activated in each transition to get
+    # total unspliced + spliced counts in each cell:
+    mu_cg = torch.stack([Zeros, Zeros], axis = -1)
+    
+    for m in range(n_modules):
+        # Transcription rate in each cell for each gene:
+        alpha_cg = A_mgON[m,:].unsqueeze(0) * boolean_cm[:,m].unsqueeze(-1) + \
+                    A_mgOFF * ~boolean_cm[:,m].unsqueeze(-1)
+        # Time since changepoint for each cell:
+        tau_c = tau_cm[:,m,:]*boolean_cm[:,m].unsqueeze(-1) + \
+                    (tau_cm[:,m,:] - t0_m[:,m,:])*~boolean_cm[:,m].unsqueeze(-1)
+        # Initial condition for each cell and gene:
+        initial_state = mu_mRNA_discreteAlpha_withPlates(A_mgON[m,:], beta_g, gamma_g,
+                                                                     t0_m[:,m,:], Zeros, Zeros)
+        
+        u0_cg = A_mgOFF + ~boolean_cm[:,m].unsqueeze(-1)*initial_state[...,0]
+        s0_cg = A_mgOFF + ~boolean_cm[:,m].unsqueeze(-1)*initial_state[...,1]
+        mu_cmg = mu_mRNA_discreteAlpha_withPlates(alpha_cg, beta_g, gamma_g,
+                                                              tau_c, u0_cg, s0_cg)
+        
+        mu_cg = mu_cg + mu_cmg
+    return torch.clip(mu_cg, min = 10**(-5))
+
+def mu_mRNA_discreteModularAlpha_localTime_4States(
+    A_mgON, A_mgOFF, beta_g, gamma_g, T_mOFF, T_cmON, T_cmOFF, I_cm, lam, Zeros):    
+    '''Calculates expected value of spliced and unspliced counts summed over multiple modules.
+    Needs rates, local latent time, module activation rate and steady-state transcription rate.'''
+    n_cells = T_cmON.shape[-3]
+    n_modules = A_mgON.shape[-2]
+    n_genes = A_mgON.shape[-1]
+    # Sum over modules activated in each transition to get
+    # total unspliced + spliced counts in each cell:
+    mu_cg = torch.stack([Zeros, Zeros], axis = -1)    
+    for m in range(n_modules):
+        # (Also sum over possible activation states of modules given by I_cm)
+        ## OFF STATE ###
+        mu_cmg = torch.stack([Zeros, Zeros], axis = -1)
+        ### ON STATE ###
+        mu_cmg += I_cm[:,m, 1].unsqueeze(-1).unsqueeze(-1) * torch.stack([(A_mgON[m,:]/beta_g).repeat([n_cells,1]),
+                                              (A_mgON[m,:]/gamma_g).repeat([n_cells,1])], axis = -1)
+        ### Induction STATE ###
+        mu_cmg += I_cm[:,m, 2].unsqueeze(-1).unsqueeze(-1) * mu_mRNA_discreteAlpha_withPlates(A_mgON[m,:], beta_g, gamma_g,
+                                                      T_cmON[:,m,:], Zeros, Zeros)
+        ### Repression STATE ###
+        # Initial condition for each cell and gene:
+        initial_state = mu_mRNA_discreteAlpha_withPlates(A_mgON[m,:], beta_g, gamma_g,
+                                                                     T_mOFF[:,m,:], Zeros, Zeros)
+        mu_cmg += I_cm[:,m, 3].unsqueeze(-1).unsqueeze(-1) * mu_mRNA_discreteAlpha_withPlates(A_mgOFF, beta_g, gamma_g,
+                                                              T_cmOFF[:,m,:], initial_state[...,0], initial_state[...,0])
+        
+        mu_cg = mu_cg + mu_cmg
+    return torch.clip(mu_cg, min = 10**(-5))
