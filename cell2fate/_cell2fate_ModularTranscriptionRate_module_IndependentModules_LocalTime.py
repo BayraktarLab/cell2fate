@@ -12,7 +12,10 @@ from cell2fate.utils import G_a, G_b, mu_mRNA_discreteModularAlpha_localTime
 from pyro.infer import config_enumerate
 from pyro.ops.indexing import Vindex
 
-class DifferentiationModel_ModularTranscriptionRate_FixedModules_LocalTime(PyroModule):
+from pyro.distributions import RelaxedOneHotCategoricalStraightThrough
+RelaxedOneHotCategoricalStraightThrough.mean = property(lambda self: self.probs)
+
+class DifferentiationModel_ModularTranscriptionRate_IndependentModules_LocalTime(PyroModule):
     r"""
     - Models spliced and unspliced counts for each gene as a dynamical process in which transcriptional modules switch on
     at one point in time and increase the transcription rate by different values across genes and then optionally switches off
@@ -29,7 +32,6 @@ class DifferentiationModel_ModularTranscriptionRate_FixedModules_LocalTime(PyroM
 
     def __init__(
         self,
-        factors,
         n_obs,
         n_vars,
         n_batch,
@@ -37,7 +39,8 @@ class DifferentiationModel_ModularTranscriptionRate_FixedModules_LocalTime(PyroM
         n_lineages = 4,
         n_transitions = 8,
         n_modules = 10,
-        detection_alpha=1.0,
+        detection_alpha=20.0,
+        alpha_dirichlet = 1.,
         alpha_g_phi_hyp_prior={"alpha": 1.0, "beta": 1.0},
         gene_add_alpha_hyp_prior={"alpha": 9.0, "beta": 3.0},
         gene_add_mean_hyp_prior={
@@ -45,13 +48,13 @@ class DifferentiationModel_ModularTranscriptionRate_FixedModules_LocalTime(PyroM
             "beta": 10.0,
         },
         factor_prior={
-            "rate": 1.0,
             "alpha": 1.0,
+            "rate": 1.0,
             "states_per_gene": 10.0},
-        detection_hyp_prior={"mean_alpha": 1.0, "mean_beta": 2.0},
+        detection_hyp_prior={"mean_alpha": 1.0, "mean_beta": 1.0},
         module_activation_rate_prior={"mean": 100, "sd": 10},
-        splicing_rate_hyp_prior={"mean_hyp_prior_mean": 0.2, "mean_hyp_prior_sd": 0.1,
-                                 "sd_hyp_prior_mean": 0.1, "sd_hyp_prior_sd": 0.05},
+        splicing_rate_hyp_prior={"mean_hyp_prior_mean": 0.8, "mean_hyp_prior_sd": 0.4,
+                                 "sd_hyp_prior_mean": 0.04, "sd_hyp_prior_sd": 0.02},
         degredation_rate_hyp_prior={"mean_hyp_prior_mean": 0.2, "mean_hyp_prior_sd": 0.1,
                                     "sd_hyp_prior_mean": 0.1, "sd_hyp_prior_sd": 0.05},
         s_overdispersion_factor_hyp_prior={'alpha_mean': 100., 'beta_mean': 1.,
@@ -88,7 +91,7 @@ class DifferentiationModel_ModularTranscriptionRate_FixedModules_LocalTime(PyroM
         self.n_batch = n_batch
         self.n_extra_categoricals = n_extra_categoricals
         self.factor_prior = factor_prior
-
+        
         self.alpha_g_phi_hyp_prior = alpha_g_phi_hyp_prior
         self.gene_add_alpha_hyp_prior = gene_add_alpha_hyp_prior
         self.gene_add_mean_hyp_prior = gene_add_mean_hyp_prior
@@ -105,11 +108,6 @@ class DifferentiationModel_ModularTranscriptionRate_FixedModules_LocalTime(PyroM
             self.np_init_vals = init_vals
             for k in init_vals.keys():
                 self.register_buffer(f"init_val_{k}", torch.tensor(init_vals[k]))
-                
-        self.register_buffer(
-            "factors",
-            torch.tensor(factors),
-        )
                 
         self.register_buffer(
             "factor_level_alpha",
@@ -262,6 +260,11 @@ class DifferentiationModel_ModularTranscriptionRate_FixedModules_LocalTime(PyroM
             torch.tensor(self.T_OFF_prior["sd"]),
         )
         
+        self.register_buffer(
+            "alpha_dirichlet",
+            torch.tensor(alpha_dirichlet*torch.ones((4))),
+        )
+        
         # per gene rate priors
         self.register_buffer(
             "factor_prior_alpha",
@@ -311,6 +314,11 @@ class DifferentiationModel_ModularTranscriptionRate_FixedModules_LocalTime(PyroM
         
         self.register_buffer(
             "t_ctON_initial", torch.zeros(self.n_obs, 1, 1))
+        
+        self.register_buffer(
+            "factor_states_per_gene",
+            torch.tensor(self.factor_prior["states_per_gene"]),
+        )
             
     ############# Define the model ################
     @staticmethod
@@ -376,9 +384,15 @@ class DifferentiationModel_ModularTranscriptionRate_FixedModules_LocalTime(PyroM
                               G_b(self.degredation_rate_sd_hyp_prior_mean, self.degredation_rate_sd_hyp_prior_sd)))
         gamma_g = pyro.sample('gamma_g', dist.Gamma(G_a(gamma_mu, gamma_sd), G_b(gamma_mu, gamma_sd)).expand([1, self.n_vars]).to_event(2))
         # Transcription rate contribution of each module:
-        factor_level_m = pyro.sample("factor_level_m",
-            dist.Gamma(self.factor_level_alpha, self.factor_level_beta).expand([self.n_modules,1]).to_event(2))
-        A_mgON = pyro.deterministic('A_mgON', factor_level_m*self.factors*(1/beta_g[0,:] + 1/gamma_g[0,:])**(-1))
+        factors_fg = pyro.sample(
+            "factors_fg",
+            dist.Gamma(
+                self.one*1,
+                self.one*10
+            )
+            .expand([self.n_modules, self.n_vars])
+            .to_event(2))
+        A_mgON = pyro.deterministic('A_mgON', factors_fg*(1/beta_g[0,:] + 1/gamma_g[0,:])**(-1))
         A_mgOFF = self.alpha_OFFg
         # Module activation rate:
         lam = pyro.sample('lam', dist.Gamma(G_a(self.module_activation_rate_mean, self.module_activation_rate_sd),
@@ -397,7 +411,7 @@ class DifferentiationModel_ModularTranscriptionRate_FixedModules_LocalTime(PyroM
         mu_expression = pyro.deterministic('mu_expression', mu_mRNA_discreteModularAlpha_localTime(
             A_mgON, A_mgOFF, beta_g, gamma_g, T_cm, T_mOFF, lam, self.zeros[idx,:]))
         
-        # =====================Cell-specific detection efficiency ======================= #
+        # =====================Cell-specific detection efficiency ======================= #z
         # y_c with hierarchical mean prior
         detection_mean_y_e = pyro.sample(
             "detection_mean_y_e",

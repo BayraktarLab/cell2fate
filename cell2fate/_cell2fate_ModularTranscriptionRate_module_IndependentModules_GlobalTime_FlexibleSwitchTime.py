@@ -8,11 +8,14 @@ from pyro.nn import PyroModule
 from scvi import REGISTRY_KEYS
 import pandas as pd
 from scvi.nn import one_hot
-from cell2fate.utils import G_a, G_b, mu_mRNA_discreteModularAlpha_localTime
+from cell2fate.utils import G_a, G_b, mu_mRNA_continousAlpha_globalTime_twoStates
 from pyro.infer import config_enumerate
 from pyro.ops.indexing import Vindex
 
-class DifferentiationModel_ModularTranscriptionRate_FixedModules_LocalTime(PyroModule):
+from pyro.distributions import RelaxedBernoulliStraightThrough
+RelaxedBernoulliStraightThrough.mean = property(lambda self: self.probs)
+
+class DifferentiationModel_ModularTranscriptionRate_IndependentModules_GlobalTime_FlexibleSwitchTime(PyroModule):
     r"""
     - Models spliced and unspliced counts for each gene as a dynamical process in which transcriptional modules switch on
     at one point in time and increase the transcription rate by different values across genes and then optionally switches off
@@ -29,37 +32,35 @@ class DifferentiationModel_ModularTranscriptionRate_FixedModules_LocalTime(PyroM
 
     def __init__(
         self,
-        factors,
         n_obs,
         n_vars,
         n_batch,
         n_extra_categoricals=None,
-        n_lineages = 4,
-        n_transitions = 8,
         n_modules = 10,
-        detection_alpha=1.0,
-        alpha_g_phi_hyp_prior={"alpha": 1.0, "beta": 1.0},
+        detection_alpha=20.0,
+        activation_probability_prior = {'alpha': 100., 'beta': 1.0},
+        alpha_g_phi_hyp_prior={"alpha": 9.0, "beta": 3.0},
         gene_add_alpha_hyp_prior={"alpha": 9.0, "beta": 3.0},
         gene_add_mean_hyp_prior={
             "alpha": 1.0,
             "beta": 10.0,
         },
         factor_prior={
-            "rate": 1.0,
             "alpha": 1.0,
+            "rate": 1.0,
             "states_per_gene": 10.0},
-        detection_hyp_prior={"mean_alpha": 1.0, "mean_beta": 2.0},
-        module_activation_rate_prior={"mean": 100, "sd": 10},
-        splicing_rate_hyp_prior={"mean_hyp_prior_mean": 0.2, "mean_hyp_prior_sd": 0.1,
-                                 "sd_hyp_prior_mean": 0.1, "sd_hyp_prior_sd": 0.05},
+        detection_hyp_prior={"mean_alpha": 1.0, "mean_beta": 1.0},
+        module_activation_rate_prior={"mean": 2, "sd": 1},
+        splicing_rate_hyp_prior={"mean_hyp_prior_mean": 0.8, "mean_hyp_prior_sd": 0.2,
+                                 "sd_hyp_prior_mean": 0.2, "sd_hyp_prior_sd": 0.1},
         degredation_rate_hyp_prior={"mean_hyp_prior_mean": 0.2, "mean_hyp_prior_sd": 0.1,
                                     "sd_hyp_prior_mean": 0.1, "sd_hyp_prior_sd": 0.05},
         s_overdispersion_factor_hyp_prior={'alpha_mean': 100., 'beta_mean': 1.,
                                            'alpha_sd': 1., 'beta_sd': 0.1},
-        factor_level_prior = {'alpha': 1.1 , 'beta': 0.5},
-        T_OFF_prior={"mean": 50, "sd": 30},
-        Tmax_k_prior={"alpha": 1., "beta": 10.},
+        factor_level_prior = {'alpha': 4., 'beta': 2.},
+        Tmax_prior={"mean": 50., "sd": 30.},
         gene_tech_prior={"mean": 1., "alpha": 200.},
+        switch_time_sd = 0.1,
         init_vals: Optional[dict] = None
     ):
         
@@ -80,15 +81,13 @@ class DifferentiationModel_ModularTranscriptionRate_FixedModules_LocalTime(PyroM
 
         ############# Initialise parameters ################
         super().__init__()
-        self.n_lineages = n_lineages
         self.n_modules = n_modules
-        self.n_transitions = n_transitions
         self.n_obs = n_obs
         self.n_vars = n_vars
         self.n_batch = n_batch
         self.n_extra_categoricals = n_extra_categoricals
         self.factor_prior = factor_prior
-
+        
         self.alpha_g_phi_hyp_prior = alpha_g_phi_hyp_prior
         self.gene_add_alpha_hyp_prior = gene_add_alpha_hyp_prior
         self.gene_add_mean_hyp_prior = gene_add_mean_hyp_prior
@@ -97,7 +96,6 @@ class DifferentiationModel_ModularTranscriptionRate_FixedModules_LocalTime(PyroM
         self.module_activation_rate_prior = module_activation_rate_prior
         self.splicing_rate_hyp_prior = splicing_rate_hyp_prior
         self.degredation_rate_hyp_prior = degredation_rate_hyp_prior
-        self.T_OFF_prior = T_OFF_prior
         detection_hyp_prior["alpha"] = detection_alpha
         self.s_overdispersion_factor_hyp_prior = s_overdispersion_factor_hyp_prior
 
@@ -105,11 +103,6 @@ class DifferentiationModel_ModularTranscriptionRate_FixedModules_LocalTime(PyroM
             self.np_init_vals = init_vals
             for k in init_vals.keys():
                 self.register_buffer(f"init_val_{k}", torch.tensor(init_vals[k]))
-                
-        self.register_buffer(
-            "factors",
-            torch.tensor(factors),
-        )
                 
         self.register_buffer(
             "factor_level_alpha",
@@ -136,14 +129,20 @@ class DifferentiationModel_ModularTranscriptionRate_FixedModules_LocalTime(PyroM
             "s_overdispersion_factor_beta_sd",
             torch.tensor(self.s_overdispersion_factor_hyp_prior["beta_sd"]),
         )
-                
+        
         self.register_buffer(
-            "Tmax_k_alpha",
-            torch.tensor(Tmax_k_prior['alpha']),
+            "Tmax_mean",
+            torch.tensor(Tmax_prior["mean"]),
         )
+             
         self.register_buffer(
-            "Tmax_k_beta",
-            torch.tensor(Tmax_k_prior['beta']),
+            "Tmax_sd",
+            torch.tensor(Tmax_prior["sd"]),
+        )
+        
+        self.register_buffer(
+            "switch_time_sd",
+            torch.tensor(switch_time_sd),
         )
 
         self.register_buffer(
@@ -252,14 +251,14 @@ class DifferentiationModel_ModularTranscriptionRate_FixedModules_LocalTime(PyroM
             torch.tensor(self.degredation_rate_hyp_prior["sd_hyp_prior_sd"]),
         )
         
-        # Register parameters for maximum time:
         self.register_buffer(
-            "T_OFF_mean",
-            torch.tensor(self.T_OFF_prior["mean"]),
-        )        
+            "activation_probability_alpha",
+            torch.tensor(activation_probability_prior['alpha']),
+        )
+        
         self.register_buffer(
-            "T_OFF_sd",
-            torch.tensor(self.T_OFF_prior["sd"]),
+            "activation_probability_beta",
+            torch.tensor(activation_probability_prior['beta']),
         )
         
         # per gene rate priors
@@ -278,39 +277,6 @@ class DifferentiationModel_ModularTranscriptionRate_FixedModules_LocalTime(PyroM
             "factor_states_per_gene",
             torch.tensor(self.factor_prior["states_per_gene"]),
         )
-        
-        self.register_buffer(
-            "ps_categorical_probs",
-                    torch.ones(self.n_modules)/(n_modules)
-        )
-        
-        self.register_buffer(
-            "I_ctm_initial",
-                            torch.zeros((self.n_obs, self.n_transitions, self.n_modules))
-        )
-        
-        self.register_buffer(
-            "ps_binary_initial",
-                                    torch.zeros((self.n_modules, self.n_modules))
-        )
-        
-        self.register_buffer(
-            "ps_initial", torch.diag_embed(torch.ones(n_modules -1), offset = 1)
-        )
-        
-        self.register_buffer(
-            "t_ctON_initial", torch.zeros((self.n_obs, self.n_transitions, 1))
-        )
-        
-        self.register_buffer(
-            "t_ctOFF_initial", torch.zeros((self.n_obs, self.n_transitions, 1))
-        )
-        
-        self.register_buffer(
-            "I_ctm_initial_probs", torch.ones(1, self.n_modules)/self.n_modules)
-        
-        self.register_buffer(
-            "t_ctON_initial", torch.zeros(self.n_obs, 1, 1))
             
     ############# Define the model ################
     @staticmethod
@@ -355,6 +321,7 @@ class DifferentiationModel_ModularTranscriptionRate_FixedModules_LocalTime(PyroM
     
     def forward(self, u_data, s_data, idx, batch_index):
         
+        batch_size = len(idx)
         obs2sample = one_hot(batch_index, self.n_batch)        
         obs_plate = self.create_plates(u_data, s_data, idx, batch_index)
         
@@ -378,24 +345,57 @@ class DifferentiationModel_ModularTranscriptionRate_FixedModules_LocalTime(PyroM
         # Transcription rate contribution of each module:
         factor_level_m = pyro.sample("factor_level_m",
             dist.Gamma(self.factor_level_alpha, self.factor_level_beta).expand([self.n_modules,1]).to_event(2))
-        A_mgON = pyro.deterministic('A_mgON', factor_level_m*self.factors*(1/beta_g[0,:] + 1/gamma_g[0,:])**(-1))
+        factors_fg = pyro.sample(
+            "factors_fg",
+            dist.Gamma(
+                self.one*1,
+                self.one*10
+            )
+            .expand([self.n_modules, self.n_vars])
+            .to_event(2))
+        A_mgON = pyro.deterministic('A_mgON', factor_level_m*factors_fg*(1/beta_g[0,:] + 1/gamma_g[0,:])**(-1))
         A_mgOFF = self.alpha_OFFg
         # Module activation rate:
-        lam = pyro.sample('lam', dist.Gamma(G_a(self.module_activation_rate_mean, self.module_activation_rate_sd),
-                                            G_b(self.module_activation_rate_mean, self.module_activation_rate_sd)))
-
-        # =====================Time======================= #
-        # Switch off time for each module:
-        T_OFF_hyper = pyro.sample('T_OFF_hyper', dist.Gamma(G_a(self.T_OFF_mean, self.T_OFF_sd), G_b(self.T_OFF_mean, self.T_OFF_sd)
-                                               ).expand([1,1, 1]).to_event(3))
-        T_mOFF = pyro.sample('T_mOFF', dist.Exponential(self.one/T_OFF_hyper).expand([1, self.n_modules, 1]).to_event(3))
-        # Time for each gene in each cell:
+        lam = pyro.sample('lam',
+                          dist.Gamma(G_a(self.module_activation_rate_mean, self.module_activation_rate_sd),
+                                     G_b(self.module_activation_rate_mean, self.module_activation_rate_sd)
+                                    ).expand([self.n_modules,1,2]).to_event(3))
+        
+        # =========== Stochastic activation of modules ============ #
+        p_m = pyro.sample('p_m', dist.Beta(self.activation_probability_alpha,
+                                           self.activation_probability_beta
+                                          ).expand([1,1,self.n_modules]).to_event(3))
         with obs_plate:
-            T_cm = pyro.sample('T_cm', dist.Exponential(self.one/T_mOFF).expand([self.n_obs, self.n_modules, 1]))
+            I_cm = pyro.sample('I_cm',
+                               RelaxedBernoulliStraightThrough(probs = p_m,
+                                                               temperature = self.one/1000.))
+        
+        # =====================Time======================= #
+        # Global time for each cell:
+        Tmax = pyro.sample('Tmax', dist.Gamma(G_a(self.Tmax_mean, self.Tmax_sd), G_b(self.Tmax_mean, self.Tmax_sd)))
+        with obs_plate:
+            t_c = pyro.sample('t_c', dist.Uniform(self.zero, self.one))
+        T_c = pyro.deterministic('T_c', t_c*Tmax)
+        # Global switch on time for each module in each cell:
+        t_mON = pyro.sample('t_mON', dist.Uniform(self.zero, self.one).expand([1, 1, self.n_modules]).to_event(3))
+        t_sd_mON = pyro.sample('t_sd_mON', dist.Exponential(self.one/self.switch_time_sd).expand([1, 1, self.n_modules]).to_event(3))
+        with obs_plate:
+            t_cmON = pyro.sample('t_cmON', dist.Gamma(G_a(t_mON, t_sd_mON), G_a(t_mON, t_sd_mON)).expand([batch_size, 1, self.n_modules]))
+        T_cmON = pyro.deterministic('T_cmON', -Tmax*self.zero_point_one + t_cmON*Tmax*self.one_point_two)
+        # Global switch off time for each module in each cell:
+        t_mOFF = pyro.sample('t_mOFF', dist.Uniform(self.zero, self.one).expand([1, 1, self.n_modules]).to_event(3))
+        t_sd_mOFF = pyro.sample('t_sd_mOFF', dist.Exponential(self.one/self.switch_time_sd).expand([1, 1, self.n_modules]).to_event(3))
+        with obs_plate:
+            t_cmOFF = pyro.sample('t_cmOFF', dist.Gamma(G_a(t_mOFF,t_sd_mOFF), G_b(t_mOFF,t_sd_mOFF)).expand([batch_size, 1, self.n_modules]))
+        T_cmOFF = pyro.deterministic('T_cmOFF', T_cmON + t_cmOFF*Tmax)
         
         # =========== Mean expression according to RNAvelocity model ======================= #
-        mu_expression = pyro.deterministic('mu_expression', mu_mRNA_discreteModularAlpha_localTime(
-            A_mgON, A_mgOFF, beta_g, gamma_g, T_cm, T_mOFF, lam, self.zeros[idx,:]))
+        # (summing over all independent modules #
+        mu_total = torch.stack([self.zeros[idx,...], self.zeros[idx,...]], axis = -1)
+        for m in range(self.n_modules):
+            mu_total += I_cm[...,m].unsqueeze(-1)*mu_mRNA_continousAlpha_globalTime_twoStates(
+                A_mgON[m,:], A_mgOFF, beta_g, gamma_g, lam[m,...], T_c[...,0], T_cmON[...,m], T_cmOFF[...,m], self.zeros[idx,...])
+        mu_expression = pyro.deterministic('mu_expression', mu_total)
         
         # =====================Cell-specific detection efficiency ======================= #
         # y_c with hierarchical mean prior
@@ -417,7 +417,7 @@ class DifferentiationModel_ModularTranscriptionRate_FixedModules_LocalTime(PyroM
         with obs_plate:
             detection_y_c = pyro.sample(
                 "detection_y_c",
-                dist.Gamma((obs2sample @ detection_hyp_prior_alpha).unsqueeze(dim=-1), beta.unsqueeze(dim=-1)).expand([len(idx), 1, 1]))  # (self.n_obs, 1)
+                dist.Gamma((obs2sample @ detection_hyp_prior_alpha).unsqueeze(dim=-1), beta.unsqueeze(dim=-1)).expand([batch_size, 1, 1]))  # (self.n_obs, 1)
         
         # =====================Gene-specific additive component ======================= #
         # s_{e,g} accounting for background, free-floating RNA
@@ -471,10 +471,10 @@ class DifferentiationModel_ModularTranscriptionRate_FixedModules_LocalTime(PyroM
         alpha_gs_inverse = pyro.deterministic(
             "alpha_gs_inverse", alpha_gu_inverse * s_overdispersion_factor_g)
 
-        # =====================Expected expression ======================= #
-        # overdispersion
+        # =====================Observed expression ======================= #
+        # observed overdispersion
         alpha = pyro.deterministic('alpha', self.ones / torch.concat([alpha_gu_inverse, alpha_gs_inverse], axis = -1).pow(2))
-        # biological expression
+        # observed mean
         mu = pyro.deterministic('mu', (mu_expression + (obs2sample @ s_g_gene_add).unsqueeze(dim=-1)  # contaminating RNA
         ) * detection_y_c)  # cell-specific normalisation
         

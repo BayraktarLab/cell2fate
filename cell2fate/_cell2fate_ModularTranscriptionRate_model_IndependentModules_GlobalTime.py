@@ -22,10 +22,10 @@ import scanpy as sc
 
 from cell2fate._pyro_base_cell2fate_module import Cell2FateBaseModule
 from cell2fate._pyro_mixin import PltExportMixin, QuantileMixin
-from ._cell2fate_ModularTranscriptionRate_module_FixedModules_LocalTime_SeperateTechnicalFactors import DifferentiationModel_ModularTranscriptionRate_FixedModules_LocalTime_SeperateTechnicalFactors
+from ._cell2fate_ModularTranscriptionRate_module_IndependentModules_GlobalTime_FlexibleSwitchTime import DifferentiationModel_ModularTranscriptionRate_IndependentModules_GlobalTime_FlexibleSwitchTime
 from cell2fate.utils import multiplot_from_generator
 
-class Cell2fate_ModularTranscriptionRate_FixedModules_LocalTime(QuantileMixin, PyroSampleMixin, PyroSviTrainMixin, PltExportMixin, BaseModelClass):
+class Cell2fate_ModularTranscriptionRate_IndependentModules_GlobalTime(QuantileMixin, PyroSampleMixin, PyroSviTrainMixin, PltExportMixin, BaseModelClass):
     """
     Cell2fate model. User-end model class. See Module class for description of the model.
 
@@ -55,7 +55,7 @@ class Cell2fate_ModularTranscriptionRate_FixedModules_LocalTime(QuantileMixin, P
         super().__init__(adata)
 
         if model_class is None:
-            model_class = DifferentiationModel_ModularTranscriptionRate_FixedModules_LocalTime_SeperateTechnicalFactors
+            model_class = DifferentiationModel_ModularTranscriptionRate_IndependentModules_GlobalTime_FlexibleSwitchTime
 
         self.module = Cell2FateBaseModule(
             model=model_class,
@@ -189,9 +189,9 @@ class Cell2fate_ModularTranscriptionRate_FixedModules_LocalTime(QuantileMixin, P
         obs2sample = adata_manager.get_from_registry(REGISTRY_KEYS.BATCH_KEY)
         obs2sample = pd.get_dummies(obs2sample.flatten())
 
-        unspliced_corrected = adata_manager.get_from_registry('unspliced')/samples["detection_y_cu"][0,:,:] - np.dot(obs2sample, samples["s_g_gene_add"][:,:])
+        unspliced_corrected = adata_manager.get_from_registry('unspliced').toarray()/samples["detection_y_c"][:,:,0] - np.dot(obs2sample, samples["s_g_gene_add"])
         adata.layers['unspliced_norm'] = unspliced_corrected - unspliced_corrected.min()
-        spliced_corrected = adata_manager.get_from_registry('spliced')/samples["detection_y_cs"][0,:,:] - np.dot(obs2sample, samples["s_g_gene_add"][:,:])
+        spliced_corrected = adata_manager.get_from_registry('spliced').toarray()/samples["detection_y_c"][:,:,0] - np.dot(obs2sample, samples["s_g_gene_add"])
         adata.layers['spliced_norm'] = spliced_corrected - spliced_corrected.min()
 
         return adata

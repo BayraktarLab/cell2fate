@@ -12,6 +12,9 @@ from cell2fate.utils import G_a, G_b, mu_mRNA_discreteModularAlpha_localTime_4St
 from pyro.infer import config_enumerate
 from pyro.ops.indexing import Vindex
 
+from pyro.distributions import RelaxedOneHotCategoricalStraightThrough
+RelaxedOneHotCategoricalStraightThrough.mean = property(lambda self: self.probs)
+
 class DifferentiationModel_ModularTranscriptionRate_FixedModules_LocalTime_4States(PyroModule):
     r"""
     - Models spliced and unspliced counts for each gene as a dynamical process in which transcriptional modules switch on
@@ -58,7 +61,7 @@ class DifferentiationModel_ModularTranscriptionRate_FixedModules_LocalTime_4Stat
         s_overdispersion_factor_hyp_prior={'alpha_mean': 100., 'beta_mean': 1.,
                                            'alpha_sd': 1., 'beta_sd': 0.1},
         factor_level_prior = {'alpha': 1.1 , 'beta': 0.5},
-        T_OFF_prior={"mean": 50, "sd": 30},
+        T_OFF_prior={"mean": 2, "sd": 1},
         Tmax_k_prior={"alpha": 1., "beta": 10.},
         gene_tech_prior={"mean": 1., "alpha": 200.},
         init_vals: Optional[dict] = None
@@ -394,7 +397,7 @@ class DifferentiationModel_ModularTranscriptionRate_FixedModules_LocalTime_4Stat
         # State of each module in each cell:
         w_k = pyro.sample('w_k', dist.Dirichlet(self.alpha_dirichlet))
         I_cm = pyro.sample('I_cm',
-                           dist.RelaxedOneHotCategoricalStraightThrough(probs = w_k,
+                           RelaxedOneHotCategoricalStraightThrough(probs = w_k,
                                                                         temperature = self.one/10**3
                                                                        ).expand([self.n_obs, self.n_modules]).to_event(2))
         # Maximal Time in Induction State:
@@ -407,11 +410,15 @@ class DifferentiationModel_ModularTranscriptionRate_FixedModules_LocalTime_4Stat
         T_mMAX = pyro.sample('T_mMAX', dist.Exponential(self.one/T_MAX_hyper).expand([1, self.n_modules, 1]).to_event(3))       
         # Time given induction or repression State:
         with obs_plate:
-            t_cmON = pyro.sample('t_cmON', dist.Uniform(self.zero, self.one).expand([self.n_obs, self.n_modules, 1]))
-        T_cmON = pyro.deterministic('T_cmON', t_cmON*T_mOFF)
+            T_cmON = pyro.sample('T_cmON', dist.Exponential(self.one/T_mOFF).expand([self.n_obs, self.n_modules, 1]))
+#         with obs_plate:
+#             t_cmON = pyro.sample('t_cmON', dist.Uniform(self.zero, self.one).expand([self.n_obs, self.n_modules, 1]))
+#         T_cmON = pyro.deterministic('T_cmON', t_cmON*T_mOFF)
         with obs_plate:
-            t_cmOFF = pyro.sample('t_cmOFF', dist.Uniform(self.zero, self.one).expand([self.n_obs, self.n_modules, 1]))
-        T_cmOFF = pyro.deterministic('T_cmOFF', t_cmOFF*T_mMAX)
+            T_cmOFF = pyro.sample('T_cmOFF', dist.Exponential(self.one/T_mMAX).expand([self.n_obs, self.n_modules, 1]))
+#         with obs_plate:
+#             t_cmOFF = pyro.sample('t_cmOFF', dist.Uniform(self.zero, self.one).expand([self.n_obs, self.n_modules, 1]))
+#         T_cmOFF = pyro.deterministic('T_cmOFF', t_cmOFF*T_mMAX)
         # =========== Mean expression according to RNAvelocity model ======================= #
         mu_expression = pyro.deterministic('mu_expression', mu_mRNA_discreteModularAlpha_localTime_4States(
             A_mgON, A_mgOFF, beta_g, gamma_g, T_mOFF, T_cmON, T_cmOFF, I_cm, lam, self.zeros))

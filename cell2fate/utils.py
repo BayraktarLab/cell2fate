@@ -524,6 +524,8 @@ def mu_mRNA_discreteAlpha_globalTime_twoStates_OnePlate(alpha_ON, alpha_OFF, bet
     # Unspliced and spliced count variance for each gene in each cell:
     return torch.clip(mu_mRNA_discreteAlpha_OnePlate(alpha_cg, beta, gamma, tau_cg, u0_g, s0_g), min = 10**(-5))
 
+
+
 def mu_mRNA_continousAlpha_globalTime_twoStates_OnePlate(alpha_ON, alpha_OFF, beta, gamma, T_c, T_gON, T_gOFF, Zeros):
     '''Calculates expected value of spliced and unspliced counts as a function of rates,
     global latent time, initial states and global switch times between two states'''
@@ -790,6 +792,32 @@ def mu_mRNA_continousAlpha_localTime_twoStates_OnePlate(alpha_ON, alpha_OFF, bet
                                                          u0_g, s0_g, delta_alpha, lam_g), min = 10**(-5))
     return mu_RNAvelocity
 
+def mu_mRNA_continousAlpha_globalTime_twoStates(alpha_ON, alpha_OFF, beta, gamma, lam_gi, T_c, T_gON, T_gOFF, Zeros):
+    '''Calculates expected value of spliced and unspliced counts as a function of rates,
+    global latent time, initial states and global switch times between two states'''
+    n_cells = T_c.shape[-2]
+    n_genes = alpha_ON.shape[-1]
+    tau = torch.clip(T_c - T_gON, min = 10**(-5))
+    t0 = T_gOFF - T_gON
+    # Transcription rate in each cell for each gene:
+    boolean = (tau < t0).reshape(n_cells, 1)
+    alpha_cg = alpha_ON*boolean + alpha_OFF*~boolean
+    # Time since changepoint for each cell and gene:
+    tau_cg = tau*boolean + (tau - t0)*~boolean
+    # Initial condition for each cell and gene:
+    lam_g = ~boolean*lam_gi[:,1] + boolean*lam_gi[:,0]
+    initial_state = mu_mRNA_continuousAlpha_withPlates(alpha_ON, beta, gamma, t0,
+                                                       Zeros, Zeros, alpha_ON-alpha_OFF, lam_gi[:,0])
+    initial_alpha = mu_alpha(alpha_ON, alpha_OFF, t0, lam_gi[:,0])
+    u0_g = 10**(-5) + ~boolean*initial_state[:,:,0]
+    s0_g = 10**(-5) + ~boolean*initial_state[:,:,1]
+    delta_alpha = ~boolean*initial_alpha*(-1) + boolean*alpha_ON*(1)
+    alpha_0 = alpha_OFF + ~boolean*initial_alpha
+    # Unspliced and spliced count variance for each gene in each cell:
+    mu_RNAvelocity = torch.clip(mu_mRNA_continuousAlpha_withPlates(alpha_cg, beta, gamma, tau_cg,
+                                                         u0_g, s0_g, delta_alpha, lam_g), min = 10**(-5))
+    return mu_RNAvelocity
+
 def mu_mRNA_continousAlpha_globalTime_twoStates_OnePlate2(alpha_ON, alpha_OFF, beta, gamma, lam_gi, T_c, T_gON, T_gOFF, Zeros):
     '''Calculates expected value of spliced and unspliced counts as a function of rates,
     global latent time, initial states and global switch times between two states'''
@@ -920,7 +948,7 @@ def mu_mRNA_discreteModularAlpha_localTime_4States(
         initial_state = mu_mRNA_discreteAlpha_withPlates(A_mgON[m,:], beta_g, gamma_g,
                                                                      T_mOFF[:,m,:], Zeros, Zeros)
         mu_cmg += I_cm[:,m, 3].unsqueeze(-1).unsqueeze(-1) * mu_mRNA_discreteAlpha_withPlates(A_mgOFF, beta_g, gamma_g,
-                                                              T_cmOFF[:,m,:], initial_state[...,0], initial_state[...,0])
+                                                              T_cmOFF[:,m,:], initial_state[...,0], initial_state[...,1])
         
         mu_cg = mu_cg + mu_cmg
     return torch.clip(mu_cg, min = 10**(-5))
