@@ -8,23 +8,20 @@ from pyro.nn import PyroModule
 from scvi import REGISTRY_KEYS
 import pandas as pd
 from scvi.nn import one_hot
-from cell2fate.utils import G_a, G_b, mu_mRNA_discreteModularAlpha_localTime_4States
+from cell2fate.utils import G_a, G_b, mu_mRNA_continousAlpha_globalTime_twoStates
 from pyro.infer import config_enumerate
 from pyro.ops.indexing import Vindex
 
-from pyro.distributions import RelaxedOneHotCategoricalStraightThrough
-RelaxedOneHotCategoricalStraightThrough.mean = property(lambda self: self.probs)
+from pyro.distributions import RelaxedBernoulliStraightThrough
+RelaxedBernoulliStraightThrough.mean = property(lambda self: self.probs)
 
-class DifferentiationModel_ModularTranscriptionRate_IndependentModules_LocalTime(PyroModule):
+class Cell2fate_ModularTranscriptionRate_module_SingleLineage_GlobalTime_FlexibleSwitchTime(PyroModule):
     r"""
     - Models spliced and unspliced counts for each gene as a dynamical process in which transcriptional modules switch on
     at one point in time and increase the transcription rate by different values across genes and then optionally switches off
     to a transcription rate of 0. Splicing and degredation rates are constant for each gene. 
     - The underlying equations are similar to
     "Bergen et al. (2020), Generalizing RNA velocity to transient cell states through dynamical modeling"
-    The difference is that modules are turned on gradually, rather an in a step-wise fashion. In addition, time is cell-specific 
-    and thus shared across all genes. Furthermore, multiple lineages can be inferred with this model,
-    by assuming different module switch times for each lineage.
     - In addition, the model includes negative binomial noise, batch effects and technical variables, similar to:
     "Kleshchevnikov et al. (2022), Cell2location maps fine-grained cell types in spatial transcriptomics".
     Although in the final version of this model technical variables will be modelled seperately for spliced and unspliced counts.
@@ -36,35 +33,25 @@ class DifferentiationModel_ModularTranscriptionRate_IndependentModules_LocalTime
         n_vars,
         n_batch,
         n_extra_categoricals=None,
-        n_lineages = 4,
-        n_transitions = 8,
         n_modules = 10,
-        detection_alpha=20.0,
-        alpha_dirichlet = 0.1,
-        alpha_g_phi_hyp_prior={"alpha": 1.0, "beta": 1.0},
-        gene_add_alpha_hyp_prior={"alpha": 9.0, "beta": 3.0},
-        gene_add_mean_hyp_prior={
-            "alpha": 1.0,
-            "beta": 10.0,
-        },
-        factor_prior={
-            "alpha": 1.0,
-            "rate": 1.0,
-            "states_per_gene": 10.0},
-        detection_hyp_prior={"mean_alpha": 1.0, "mean_beta": 1.0},
-        module_activation_rate_prior={"mean": 100, "sd": 10},
-        splicing_rate_hyp_prior={"mean_hyp_prior_mean": 0.8, "mean_hyp_prior_sd": 0.4,
-                                 "sd_hyp_prior_mean": 0.04, "sd_hyp_prior_sd": 0.02},
-        degredation_rate_hyp_prior={"mean_hyp_prior_mean": 0.2, "mean_hyp_prior_sd": 0.1,
+        stochastic_v_ag_hyp_prior={"alpha": 9.0, "beta": 3.0},
+        factor_prior={ "alpha": 1.0, "rate": 1.0, "states_per_gene": 10.0},
+        t_switch_alpha_prior = {"mean": 20., "alpha": 20.},
+        splicing_rate_hyp_prior={"mean_hyp_prior_mean": 1.0, "mean_hyp_prior_sd": 0.4,
+                                 "sd_hyp_prior_mean": 0.1, "sd_hyp_prior_sd": 0.05},
+        degredation_rate_hyp_prior={"mean_hyp_prior_mean": 0.25, "mean_hyp_prior_sd": 0.1,
                                     "sd_hyp_prior_mean": 0.1, "sd_hyp_prior_sd": 0.05},
+        activation_rate_hyp_prior={"mean_hyp_prior_mean": 1, "mean_hyp_prior_sd": 0.33,
+                                    "sd_hyp_prior_mean": 0.33, "sd_hyp_prior_sd": 0.1},
         s_overdispersion_factor_hyp_prior={'alpha_mean': 100., 'beta_mean': 1.,
                                            'alpha_sd': 1., 'beta_sd': 0.1},
-        factor_level_prior = {'alpha': 1.1 , 'beta': 0.5},
-        T_OFF_prior={"mean": 50, "sd": 30},
-        Tmax_k_prior={"alpha": 1., "beta": 10.},
-        gene_tech_prior={"mean": 1., "alpha": 200.},
-        u_detection_factor_mean_cv = 0.5,
-        u_detection_factor_g_cv = 0.1,
+        detection_hyp_prior={"alpha": 20.0, "mean_alpha": 1.0, "mean_beta": 1.0},
+        detection_i_prior={"mean": 1, "alpha": 100},
+        detection_gi_prior={"mean": 1, "alpha": 200},
+        gene_add_alpha_hyp_prior={"alpha": 9.0, "beta": 3.0},
+        gene_add_mean_hyp_prior={"alpha": 1.0, "beta": 100.0},
+        Tmax_prior={"mean": 50., "sd": 20.},
+        switch_time_sd = 0.1,
         init_vals: Optional[dict] = None
     ):
         
@@ -76,54 +63,36 @@ class DifferentiationModel_ModularTranscriptionRate_IndependentModules_LocalTime
         n_vars
         n_batch
         n_extra_categoricals
-        alpha_g_phi_hyp_prior
         gene_add_alpha_hyp_prior
         gene_add_mean_hyp_prior
         detection_hyp_prior
-        gene_tech_prior
         """
-        
+
         ############# Initialise parameters ################
         super().__init__()
-        self.n_lineages = n_lineages
         self.n_modules = n_modules
-        self.n_transitions = n_transitions
         self.n_obs = n_obs
         self.n_vars = n_vars
         self.n_batch = n_batch
         self.n_extra_categoricals = n_extra_categoricals
         self.factor_prior = factor_prior
         
-        self.alpha_g_phi_hyp_prior = alpha_g_phi_hyp_prior
+        self.stochastic_v_ag_hyp_prior = stochastic_v_ag_hyp_prior
         self.gene_add_alpha_hyp_prior = gene_add_alpha_hyp_prior
         self.gene_add_mean_hyp_prior = gene_add_mean_hyp_prior
         self.detection_hyp_prior = detection_hyp_prior
-        self.gene_tech_prior = gene_tech_prior
-        self.module_activation_rate_prior = module_activation_rate_prior
         self.splicing_rate_hyp_prior = splicing_rate_hyp_prior
         self.degredation_rate_hyp_prior = degredation_rate_hyp_prior
-        self.T_OFF_prior = T_OFF_prior
-        detection_hyp_prior["alpha"] = detection_alpha
         self.s_overdispersion_factor_hyp_prior = s_overdispersion_factor_hyp_prior
-        
-        # Training mode:
-        self.training_without_data = False
-        self.training_with_initial = False       
+        self.t_switch_alpha_prior = t_switch_alpha_prior
+        self.detection_gi_prior = detection_gi_prior
+        self.detection_i_prior = detection_i_prior
 
         if (init_vals is not None) & (type(init_vals) is dict):
             self.np_init_vals = init_vals
             for k in init_vals.keys():
                 self.register_buffer(f"init_val_{k}", torch.tensor(init_vals[k]))
-                
-        self.register_buffer(
-            "factor_level_alpha",
-            torch.tensor(factor_level_prior["alpha"]),
-        )
-        self.register_buffer(
-            "factor_level_beta",
-            torch.tensor(factor_level_prior["beta"]),
-        )        
-                
+                   
         self.register_buffer(
             "s_overdispersion_factor_alpha_mean",
             torch.tensor(self.s_overdispersion_factor_hyp_prior["alpha_mean"]),
@@ -140,15 +109,51 @@ class DifferentiationModel_ModularTranscriptionRate_IndependentModules_LocalTime
             "s_overdispersion_factor_beta_sd",
             torch.tensor(self.s_overdispersion_factor_hyp_prior["beta_sd"]),
         )
-                
+        
         self.register_buffer(
-            "Tmax_k_alpha",
-            torch.tensor(Tmax_k_prior['alpha']),
+            "detection_gi_prior_alpha",
+            torch.tensor(self.detection_gi_prior["alpha"]),
         )
         self.register_buffer(
-            "Tmax_k_beta",
-            torch.tensor(Tmax_k_prior['beta']),
+            "detection_gi_prior_beta",
+            torch.tensor(self.detection_gi_prior["alpha"] / self.detection_gi_prior["mean"]),
         )
+        
+        self.register_buffer(
+            "detection_i_prior_alpha",
+            torch.tensor(self.detection_i_prior["alpha"]),
+        )
+        self.register_buffer(
+            "detection_i_prior_beta",
+            torch.tensor(self.detection_i_prior["alpha"] / self.detection_i_prior["mean"]),
+        )
+        
+        self.register_buffer(
+            "Tmax_mean",
+            torch.tensor(Tmax_prior["mean"]),
+        )
+             
+        self.register_buffer(
+            "Tmax_sd",
+            torch.tensor(Tmax_prior["sd"]),
+        )
+        
+        self.register_buffer(
+            "switch_time_sd",
+            torch.tensor(switch_time_sd),
+        )
+        
+        self.register_buffer(
+            "t_mi_alpha_alpha",
+            torch.tensor(t_switch_alpha_prior['alpha']),
+        )
+        
+        self.register_buffer(
+            "t_mi_alpha_mu",
+            torch.tensor(t_switch_alpha_prior['alpha']),
+        )
+        
+        self.t_switch_alpha_prior
 
         self.register_buffer(
             "detection_mean_hyp_prior_alpha",
@@ -158,22 +163,14 @@ class DifferentiationModel_ModularTranscriptionRate_IndependentModules_LocalTime
             "detection_mean_hyp_prior_beta",
             torch.tensor(self.detection_hyp_prior["mean_beta"]),
         )
-        self.register_buffer(
-            "gene_tech_prior_alpha",
-            torch.tensor(self.gene_tech_prior["alpha"]),
-        )
-        self.register_buffer(
-            "gene_tech_prior_beta",
-            torch.tensor(self.gene_tech_prior["alpha"] / self.gene_tech_prior["mean"]),
-        )
 
         self.register_buffer(
-            "alpha_g_phi_hyp_prior_alpha",
-            torch.tensor(self.alpha_g_phi_hyp_prior["alpha"]),
+            "stochastic_v_ag_hyp_prior_alpha",
+            torch.tensor(self.stochastic_v_ag_hyp_prior["alpha"]),
         )
         self.register_buffer(
-            "alpha_g_phi_hyp_prior_beta",
-            torch.tensor(self.alpha_g_phi_hyp_prior["beta"]),
+            "stochastic_v_ag_hyp_prior_beta",
+            torch.tensor(self.stochastic_v_ag_hyp_prior["beta"]),
         )
         self.register_buffer(
             "gene_add_alpha_hyp_prior_alpha",
@@ -211,14 +208,22 @@ class DifferentiationModel_ModularTranscriptionRate_IndependentModules_LocalTime
         self.register_buffer("zeros", torch.zeros(self.n_obs, self.n_vars))
         self.register_buffer("ones_g", torch.ones((1,self.n_vars,1)))
         
-        # Register parameters for module activation rate:
+        # Register parameters for activation rate hyperprior:
         self.register_buffer(
-            "module_activation_rate_mean",
-            torch.tensor(self.module_activation_rate_prior["mean"]),
+            "activation_rate_mean_hyp_prior_mean",
+            torch.tensor(activation_rate_hyp_prior["mean_hyp_prior_mean"]),
         )        
         self.register_buffer(
-            "module_activation_rate_sd",
-            torch.tensor(self.module_activation_rate_prior["sd"]),
+            "activation_rate_mean_hyp_prior_sd",
+            torch.tensor(activation_rate_hyp_prior["mean_hyp_prior_sd"]),
+        )
+        self.register_buffer(
+            "activation_rate_sd_hyp_prior_mean",
+            torch.tensor(activation_rate_hyp_prior["sd_hyp_prior_mean"]),
+        )
+        self.register_buffer(
+            "activation_rate_sd_hyp_prior_sd",
+            torch.tensor(activation_rate_hyp_prior["sd_hyp_prior_sd"]),
         )
         
         # Register parameters for splicing rate hyperprior:
@@ -257,21 +262,6 @@ class DifferentiationModel_ModularTranscriptionRate_IndependentModules_LocalTime
             torch.tensor(self.degredation_rate_hyp_prior["sd_hyp_prior_sd"]),
         )
         
-        # Register parameters for maximum time:
-        self.register_buffer(
-            "T_OFF_mean",
-            torch.tensor(self.T_OFF_prior["mean"]),
-        )        
-        self.register_buffer(
-            "T_OFF_sd",
-            torch.tensor(self.T_OFF_prior["sd"]),
-        )
-        
-        self.register_buffer(
-            "alpha_dirichlet",
-            torch.tensor(alpha_dirichlet*torch.ones((4))),
-        )
-        
         # per gene rate priors
         self.register_buffer(
             "factor_prior_alpha",
@@ -287,49 +277,6 @@ class DifferentiationModel_ModularTranscriptionRate_IndependentModules_LocalTime
         self.register_buffer(
             "factor_states_per_gene",
             torch.tensor(self.factor_prior["states_per_gene"]),
-        )
-        
-        self.register_buffer(
-            "ps_categorical_probs",
-                    torch.ones(self.n_modules)/(n_modules)
-        )
-        
-        self.register_buffer(
-            "I_ctm_initial",
-                            torch.zeros((self.n_obs, self.n_transitions, self.n_modules))
-        )
-        
-        self.register_buffer(
-            "ps_binary_initial",
-                                    torch.zeros((self.n_modules, self.n_modules))
-        )
-        
-        self.register_buffer(
-            "ps_initial", torch.diag_embed(torch.ones(n_modules -1), offset = 1)
-        )
-        
-        self.register_buffer(
-            "t_ctON_initial", torch.zeros((self.n_obs, self.n_transitions, 1))
-        )
-        
-        self.register_buffer(
-            "t_ctOFF_initial", torch.zeros((self.n_obs, self.n_transitions, 1))
-        )
-        
-        self.register_buffer(
-            "I_ctm_initial_probs", torch.ones(1, self.n_modules)/self.n_modules)
-        
-        self.register_buffer(
-            "t_ctON_initial", torch.zeros(self.n_obs, 1, 1))
-        
-        self.register_buffer(
-            "u_detection_factor_mean_cv",
-            torch.tensor(u_detection_factor_mean_cv),
-        )
-        
-        self.register_buffer(
-            "u_detection_factor_g_cv",
-            torch.tensor(u_detection_factor_g_cv),
         )
             
     ############# Define the model ################
@@ -375,9 +322,9 @@ class DifferentiationModel_ModularTranscriptionRate_IndependentModules_LocalTime
     
     def forward(self, u_data, s_data, idx, batch_index):
         
+        batch_size = len(idx)
         obs2sample = one_hot(batch_index, self.n_batch)        
         obs_plate = self.create_plates(u_data, s_data, idx, batch_index)
-        batch_size = len(idx)
         
         # ===================== Kinetic Rates ======================= #
         # Splicing rate:
@@ -401,56 +348,63 @@ class DifferentiationModel_ModularTranscriptionRate_IndependentModules_LocalTime
             "factor_level_g",
             dist.Gamma(self.factor_prior_alpha, self.factor_prior_beta)
             .expand([1, self.n_vars])
-            .to_event(2),
-            obs=getattr(self, "fixed_val_factor_level_g", None),
+            .to_event(2)
         )
-        g_fg = pyro.sample(
+        g_fg = pyro.sample( # (g_fg corresponds to module's spliced counts in steady state)
             "g_fg",
             dist.Gamma(
                 self.factor_states_per_gene / self.n_factors_torch,
                 self.ones / factor_level_g,
             )
             .expand([self.n_modules, self.n_vars])
-            .to_event(2),
-            obs=getattr(self, "fixed_val_g_fg", None),
+            .to_event(2)
         )
-        A_mgON = pyro.deterministic('A_mgON', g_fg/gamma_g)
-        A_mgOFF = self.alpha_OFFg
-        # Module activation rate:
-        lam = pyro.sample('lam', dist.Gamma(G_a(self.module_activation_rate_mean, self.module_activation_rate_sd),
-                                            G_b(self.module_activation_rate_mean, self.module_activation_rate_sd)))
-
+        A_mgON = pyro.deterministic('A_mgON', g_fg*gamma_g) # (transform from spliced counts to transcription rate)
+        A_mgOFF = self.alpha_OFFg        
+        # Activation and Deactivation rate:
+        lam_mu = pyro.sample('lam_mu', dist.Gamma(G_a(self.activation_rate_mean_hyp_prior_mean, self.activation_rate_mean_hyp_prior_sd),
+                                            G_b(self.activation_rate_mean_hyp_prior_mean, self.activation_rate_mean_hyp_prior_sd)))
+        lam_sd = pyro.sample('lam_sd', dist.Gamma(G_a(self.activation_rate_sd_hyp_prior_mean, self.activation_rate_sd_hyp_prior_sd),
+                                            G_b(self.activation_rate_sd_hyp_prior_mean, self.activation_rate_sd_hyp_prior_sd)))
+        lam_m_mu = pyro.sample('lam_m_mu', dist.Gamma(G_a(lam_mu, lam_sd),
+                                            G_b(lam_mu, lam_sd)).expand([self.n_modules, 1, 1]).to_event(3))
+        lam_mi = pyro.sample('lam_mi', dist.Gamma(G_a(lam_m_mu, lam_m_mu*0.05),
+                                            G_b(lam_m_mu, lam_m_mu*0.05)).expand([self.n_modules, 1, 2]).to_event(3))
+        
         # =====================Time======================= #
-        # State of each module in each cell:
-        w_k = pyro.sample('w_k', dist.Dirichlet(self.alpha_dirichlet))
+        # Global time for each cell:
+        Tmax = pyro.sample('Tmax', dist.Gamma(G_a(self.Tmax_mean, self.Tmax_sd), G_b(self.Tmax_mean, self.Tmax_sd)))
         with obs_plate:
-            I_cm = pyro.sample('I_cm',
-                               RelaxedOneHotCategoricalStraightThrough(probs = w_k,
-                                                                            temperature = self.one/10**3
-                                                                           ).expand([batch_size, self.n_modules, 1]))
-        # Maximal Time in Induction State:
-        T_OFF_hyper = pyro.sample('T_OFF_hyper', dist.Gamma(G_a(self.T_OFF_mean, self.T_OFF_sd), G_b(self.T_OFF_mean, self.T_OFF_sd)
-                                               ).expand([1,1, 1]).to_event(3))
-        T_mOFF = pyro.sample('T_mOFF', dist.Exponential(self.one/T_OFF_hyper).expand([1, self.n_modules, 1]).to_event(3))
+            t_c = pyro.sample('t_c', dist.Uniform(self.zero, self.one))
+        T_c = pyro.deterministic('T_c', t_c*Tmax)
+        # Variability of switch times for each module:
+        t_mi_alpha = pyro.sample('t_mON_alpha',
+                                 dist.Gamma(self.t_mi_alpha_alpha,
+                                            self.t_mi_alpha_alpha/self.t_mi_alpha_mu).expand([1, 1, self.n_modules]).to_event(3))
+        # Global switch on time for each module in each cell:
+        t_mON = pyro.sample('t_mON', dist.Uniform(self.zero, self.one).expand([1, 1, self.n_modules]).to_event(3))
+        with obs_plate:
+            t_cmON = pyro.sample('t_cmON', dist.Gamma(t_mi_alpha, t_mi_alpha/t_mON).expand([batch_size, 1, self.n_modules]))
+        T_cmON = pyro.deterministic('T_cmON', -Tmax*self.zero_point_one + t_cmON*Tmax*self.one_point_two)
+        # Global switch off time for each module in each cell:
+        t_mOFF = pyro.sample('t_mOFF', dist.Uniform(self.zero, self.one).expand([1, 1, self.n_modules]).to_event(3))
+        with obs_plate:
+            t_cmOFF = pyro.sample('t_cmOFF', dist.Gamma(t_mi_alpha, t_mi_alpha/t_mOFF).expand([batch_size, 1, self.n_modules]))
+        T_cmOFF = pyro.deterministic('T_cmOFF', T_cmON + t_cmOFF*Tmax)
         
-        # Use Beta distribution?
-        with obs_plate:
-            t_cmON = pyro.sample('t_cmON', dist.Uniform(self.zero, self.one).expand([batch_size, self.n_modules, 1]))
-        T_cmON = pyro.deterministic('T_cmON', t_cmON*T_mOFF)
-        with obs_plate:
-            t_cmOFF = pyro.sample('t_cmOFF', dist.Uniform(self.zero, self.one).expand([batch_size, self.n_modules, 1]))
-        T_cmOFF = pyro.deterministic('T_cmOFF', t_cmOFF*T_mOFF)
-        
-        if not self.training_without_data:
-            # =========== Mean expression according to RNAvelocity model ======================= #
-            mu_expression = pyro.deterministic('mu_expression', mu_mRNA_discreteModularAlpha_localTime_4States(
-                A_mgON, A_mgOFF, beta_g, gamma_g, T_mOFF, T_cmON, T_cmOFF, I_cm[...,0,:], lam, self.zeros))
+        # =========== Mean expression according to RNAvelocity model ======================= #
+        # (summing over all independent modules)
+        mu_total = torch.stack([self.zeros[idx,...], self.zeros[idx,...]], axis = -1)
+        for m in range(self.n_modules):
+            mu_total += mu_mRNA_continousAlpha_globalTime_twoStates(
+                A_mgON[m,:], A_mgOFF, beta_g, gamma_g, lam_mi[m,...], T_c[...,0], T_cmON[...,m], T_cmOFF[...,m], self.zeros[idx,...])
+        mu_expression = pyro.deterministic('mu_expression', mu_total)
         
         # =============Detection efficiency of spliced and unspliced counts =============== #
-        # Spliced counts cell specific relative detection efficiency with hierarchical prior across batches:
+        # Cell specific relative detection efficiency with hierarchical prior across batches:
         detection_mean_y_e = pyro.sample(
             "detection_mean_y_e",
-            dist.Gamma(
+            dist.Beta(
                 self.ones * self.detection_mean_hyp_prior_alpha,
                 self.ones * self.detection_mean_hyp_prior_beta,
             )
@@ -459,24 +413,36 @@ class DifferentiationModel_ModularTranscriptionRate_IndependentModules_LocalTime
         )
         detection_hyp_prior_alpha = pyro.deterministic(
             "detection_hyp_prior_alpha",
-            self.ones_n_batch_1 * self.detection_hyp_prior_alpha,
+            self.detection_hyp_prior_alpha,
         )
-        beta = (obs2sample @ detection_hyp_prior_alpha) / (obs2sample @ detection_mean_y_e)
+
+        beta = detection_hyp_prior_alpha / (obs2sample @ detection_mean_y_e)
         with obs_plate:
-            detection_y_cs = pyro.sample(
-                "detection_y_cs",
-                dist.Gamma((obs2sample @ detection_hyp_prior_alpha).unsqueeze(dim=-1),
-                           beta.unsqueeze(dim=-1)).expand([batch_size, 1, 1]))
-        # Relative detection efficiency of unspliced counts is scaled by a common factor across all cells:
-        u_detection_factor_mean = pyro.sample(
-            "u_detection_factor_mean",
-            dist.Gamma(G_a(self.one, self.u_detection_factor_mean_cv), G_b(self.one, self.u_detection_factor_mean_cv)))
-        detection_y_cu = pyro.deterministic(
-            "detection_y_cu", detection_y_cs * u_detection_factor_mean)
-        # Relative detection efficiency of unspliced counts is variable across genes: 
-        u_detection_factor_g = pyro.sample("u_detection_factor_g",
-            dist.Gamma(G_a(u_detection_factor_mean, self.u_detection_factor_g_cv*u_detection_factor_mean),
-            G_b(u_detection_factor_mean, self.u_detection_factor_g_cv*u_detection_factor_mean)).expand([1, self.n_vars, 1]).to_event(3))
+            detection_y_c = pyro.sample(
+                "detection_y_c",
+                dist.Gamma(detection_hyp_prior_alpha.unsqueeze(dim=-1), beta.unsqueeze(dim=-1)),
+            )  # (self.n_obs, 1)        
+        
+        # Global relative detection efficiency between spliced and unspliced counts
+        detection_y_i = pyro.sample(
+            "detection_y_i",
+            dist.Gamma(
+                self.ones * self.detection_i_prior_alpha,
+                self.ones * self.detection_i_prior_alpha,
+            )
+            .expand([1, 1, 2]).to_event(3)
+        )
+        
+        # Gene specific relative detection efficiency between spliced and unspliced counts
+        detection_y_gi = pyro.sample(
+            "detection_y_gi",
+            dist.Gamma(
+                self.ones * self.detection_gi_prior_alpha,
+                self.ones * self.detection_gi_prior_alpha,
+            )
+            .expand([1, self.n_vars, 2])
+            .to_event(3),
+        )
         
         # =======Gene-specific additive component (Ambient RNA/ "Soup") for spliced and unspliced counts ====== #
         # Independently sampled for spliced and unspliced counts:
@@ -507,41 +473,29 @@ class DifferentiationModel_ModularTranscriptionRate_IndependentModules_LocalTime
 
         # =========Gene-specific overdispersion of spliced and unspliced counts ============== #
         # Overdispersion of unspliced counts:
-        alpha_g_phi_hyp = pyro.sample(
-            "alpha_g_phi_hyp",
-            dist.Gamma(self.alpha_g_phi_hyp_prior_alpha, self.alpha_g_phi_hyp_prior_beta),
-        )
-        alpha_gu_inverse = pyro.sample(
-            "alpha_gu_inverse",
-            dist.Exponential(alpha_g_phi_hyp).expand([1, self.n_vars,1]).to_event(2),
-        )
-        # Overdispersion of spliced counts:
-        s_overdispersion_factor_alpha = pyro.sample(
-            "s_overdispersion_factor_alpha", 
-            dist.Gamma(G_a(self.s_overdispersion_factor_alpha_mean, self.s_overdispersion_factor_alpha_sd),
-                       G_b(self.s_overdispersion_factor_alpha_mean, self.s_overdispersion_factor_alpha_sd)))
-        s_overdispersion_factor_beta = pyro.sample(
-            "s_overdispersion_factor_beta",
-            dist.Gamma(G_a(self.s_overdispersion_factor_beta_mean, self.s_overdispersion_factor_beta_sd),
-                       G_b(self.s_overdispersion_factor_beta_mean, self.s_overdispersion_factor_beta_sd)))
-        s_overdispersion_factor_g = pyro.sample("s_overdispersion_factor_g",
-            dist.Beta(s_overdispersion_factor_alpha, s_overdispersion_factor_beta).expand([1, self.n_vars, 1]).to_event(3))
-        alpha_gs_inverse = pyro.deterministic(
-            "alpha_gs_inverse", alpha_gu_inverse * s_overdispersion_factor_g)
-        
-        if not self.training_without_data:
-            # =====================Expected expression ======================= #
-            # overdispersion
-            alpha = pyro.deterministic('alpha', self.ones / torch.concat([alpha_gu_inverse, alpha_gs_inverse], axis = -1).pow(2))
-            # biological expression
-            mu = pyro.deterministic('mu', (mu_expression + torch.einsum('cbi,bgi->cgi', obs2sample.unsqueeze(dim=-1), s_g_gene_add)) * \
-            (torch.concat([detection_y_cu, detection_y_cs], axis = -1)*torch.concat([u_detection_factor_g, self.ones_g], axis = -1)))  # cell-specific normalisation
+        stochastic_v_ag_hyp = pyro.sample(
+        "stochastic_v_ag_hyp",
+        dist.Gamma(
+            self.stochastic_v_ag_hyp_prior_alpha,
+            self.stochastic_v_ag_hyp_prior_beta,
+        ).expand([1, 2]).to_event(2))
+        stochastic_v_ag_inv = pyro.sample(
+            "stochastic_v_ag_inv",
+            dist.Exponential(stochastic_v_ag_hyp)
+            .expand([1, self.n_vars, 2]).to_event(3),
+        ) 
+        stochastic_v_ag = (self.ones / stochastic_v_ag_inv.pow(2))        
 
-            # =====================DATA likelihood ======================= #
-            # Likelihood (sampling distribution) of data_target & add overdispersion via NegativeBinomial
-            with obs_plate:
-                pyro.sample("data_target", dist.GammaPoisson(concentration= alpha,
-                           rate= alpha / mu), obs=torch.stack([u_data, s_data], axis = 2))
+        # =====================Expected expression ======================= #
+        # biological expression
+        mu = pyro.deterministic('mu', (mu_expression + torch.einsum('cbi,bgi->cgi', obs2sample.unsqueeze(dim=-1), s_g_gene_add)) * \
+        detection_y_c * detection_y_i * detection_y_gi)
+        
+        # =====================DATA likelihood ======================= #
+        # Likelihood (sampling distribution) of data_target & add overdispersion via NegativeBinomial
+        with obs_plate:
+            pyro.sample("data_target", dist.GammaPoisson(concentration= stochastic_v_ag,
+                       rate= stochastic_v_ag / mu), obs=torch.stack([u_data, s_data], axis = 2))
 
     # =====================Other functions======================= #
     def compute_expected(self, samples, adata_manager, ind_x=None):

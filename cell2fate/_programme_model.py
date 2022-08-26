@@ -17,7 +17,7 @@ from cell2fate._pyro_mixin import (
 )
 from pyro import clear_param_store
 from pyro.infer import Trace_ELBO, TraceEnum_ELBO
-from pyro.infer.autoguide import AutoHierarchicalNormalMessenger
+from pyro.infer.autoguide import AutoHierarchicalNormalMessenger, AutoNormal
 from scvi import REGISTRY_KEYS
 from scvi.data import AnnDataManager
 from scvi.data.fields import (
@@ -26,7 +26,7 @@ from scvi.data.fields import (
     LayerField,
     NumericalJointObsField,
     NumericalObsField,
-    ObsmField,
+    ObsmField
 )
 from scvi.dataloaders import DataSplitter, DeviceBackedDataSplitter
 from scvi.model.base import BaseModelClass, PyroSampleMixin, PyroSviTrainMixin
@@ -35,7 +35,7 @@ from scvi.train import PyroTrainingPlan, TrainRunner
 from scvi.utils import setup_anndata_dsp
 from scvi.nn import one_hot
 from cell2fate._regression_model import RegressionBaseModule
-from cell2fate._mean_programme_module import MeanProgrammePyroModel
+from cell2fate._mean_programme_module_ContinuousPriors import MeanProgrammePyroModel
 
 class ProgrammeModel(
     QuantileMixin,
@@ -85,7 +85,12 @@ class ProgrammeModel(
         clear_param_store()
 
         super().__init__(adata)
-
+        
+        if "n_extra_categoricals" not in model_kwargs:
+            model_kwargs["n_extra_categoricals"] = 1
+        if "n_var_categoricals" not in model_kwargs:
+            model_kwargs["n_var_categoricals"] = 1
+        
         self.mi_ = []
         self.minibatch_genes_ = False
 
@@ -115,7 +120,6 @@ class ProgrammeModel(
             )
             self.n_extra_categoricals_ = self.extra_categoricals_.n_cats_per_key
             model_kwargs["n_extra_categoricals"] = self.n_extra_categoricals_
-
             model_kwargs["n_obs"] = self.summary_stats["n_cells"]
             model_kwargs["n_vars"] = self.summary_stats["n_vars"]
             model_kwargs["n_batch"] = self.summary_stats["n_batch"]
@@ -137,6 +141,7 @@ class ProgrammeModel(
         transpose: bool = False,
         layer: Optional[str] = None,
         spliced_key = 'spliced_raw',
+        spliced_fraction_retained_key = 'spliced_fraction_retained',
         batch_key: Optional[str] = None,
         labels_key: Optional[str] = None,
         rna_index: Optional[str] = None,
@@ -164,128 +169,50 @@ class ProgrammeModel(
         -------
         %(returns)s
         """
-
+        
+        if categorical_covariate_keys is None:
+            adata.obs['Dummy 1'] = 'Dummy 1'
+            categorical_covariate_keys = ['Dummy 1']
+        if variance_categories is None:
+            adata.obs['Dummy 2'] = 'Dummy 2'
+            variance_categories = 'Dummy 1'
+        
         setup_method_args = cls._get_setup_method_args(**locals())
 
-        if transpose:
-            # transpose anndata for minibatching genes
-            adata_nontransposed = adata.T.copy()
-            # if index for cells that have RNA measurements does not exist assume all cells have RNA
-            if rna_index is None:
-                adata_nontransposed.obs["_rna_index"] = True
-                rna_index = "_rna_index"
+        # add index for each cell (provided to pyro plate for correct minibatching)
+        adata.obs["_indices"] = np.arange(adata.n_obs).astype("int64")
 
-            # using annotations of genes and regions derive plate indices ('local_indices')
-            gene_bool = adata.obs[gene_bool_key]
-            gene_ind = np.where(gene_bool)[0]
-            n_genes = len(gene_ind)
-            region_ind = np.where(np.logical_not(gene_bool))[0]
-            n_regions = adata.n_obs - n_genes
-            local_index_series = pd.Series(index=np.arange(adata.n_obs))
-            local_index_series.loc[gene_ind] = np.arange(n_genes)
-            local_index_series.loc[region_ind] = np.arange(n_regions)
-            adata.obs["local_indices"] = local_index_series.values.astype(int).flatten()
+        # if index for cells that have RNA measurements does not exist assume all cells have RNA
+        if rna_index is None:
+            adata.obs["_rna_index"] = True
+            rna_index = "_rna_index"
 
-            # add index for each gene (provided to pyro plate for correct minibatching)
-            adata.obs["_indices"] = np.arange(adata.n_obs).astype("int64")
+        anndata_fields = [
+            LayerField('spliced', spliced_key, is_count_data=True),
+            CategoricalObsField(REGISTRY_KEYS.BATCH_KEY, batch_key),
+            CategoricalObsField(REGISTRY_KEYS.LABELS_KEY, labels_key),
+            CategoricalJointObsField(
+                REGISTRY_KEYS.CAT_COVS_KEY, categorical_covariate_keys
+            ),
+            NumericalJointObsField(
+                REGISTRY_KEYS.CONT_COVS_KEY, continuous_covariate_keys
+            ),
+            NumericalObsField(REGISTRY_KEYS.INDICES_KEY, "_indices"),
+            NumericalObsField("rna_index", rna_index),
+#             NumericalObsField("fraction_retained", spliced_fraction_retained_key),
+        ]
 
-            anndata_fields = [
-                LayerField(spliced_key, 'spliced', is_count_data=True),
-                NumericalObsField(REGISTRY_KEYS.INDICES_KEY, "_indices"),
-                NumericalObsField("gene_bool", gene_bool_key),
-                NumericalObsField("local_indices", "local_indices"),
-            ]
-            if gene_region_coo_key is not None:
-                anndata_fields.append(ObsmField("gene_region_coo", gene_region_coo_key))
-            if region_motif_coo_key is not None:
-                anndata_fields.append(
-                    ObsmField("region_motif_coo", region_motif_coo_key)
-                )
-            if promoter_motif_coo_key is not None:
-                anndata_fields.append(
-                    ObsmField("promoter_motif_coo", promoter_motif_coo_key)
-                )
-            # generate cell-specific fixed input ##########
-            # add index for each cell (provided to pyro plate for correct minibatching)
-            adata_nontransposed.obs["_indices"] = np.arange(
-                adata_nontransposed.n_obs
-            ).astype("int64")
-
-            obs_anndata_fields = [
-                LayerField('spliced', spliced_key, is_count_data=True),
-                CategoricalObsField(REGISTRY_KEYS.BATCH_KEY, batch_key),
-                CategoricalObsField(REGISTRY_KEYS.LABELS_KEY, labels_key),
-                CategoricalJointObsField(
-                    REGISTRY_KEYS.CAT_COVS_KEY, categorical_covariate_keys
-                ),
-                NumericalJointObsField(
-                    REGISTRY_KEYS.CONT_COVS_KEY, continuous_covariate_keys
-                ),
-                NumericalObsField(REGISTRY_KEYS.INDICES_KEY, "_indices"),
-                NumericalObsField("rna_index", rna_index),
-            ]
-
-            # annotations for covariates that affect stochastic variance
-            if variance_categories is not None:
-                obs_anndata_fields.append(
-                    CategoricalObsField("var_categoricals", variance_categories)
-                )
-            obs_adata_manager = AnnDataManager(
-                fields=obs_anndata_fields, setup_method_args=setup_method_args
+        # annotations for covariates that affect stochastic variance
+        if variance_categories is not None:
+            anndata_fields.append(
+                CategoricalObsField("var_categoricals", variance_categories)
             )
-            obs_adata_manager.register_fields(adata_nontransposed, **kwargs)
-            cell_specific_vals = {
-                k: obs_adata_manager.get_from_registry(k)
-                for k in obs_adata_manager.data_registry.keys()
-                if k != REGISTRY_KEYS.X_KEY
-            }
-            cell_specific_state_registry = {
-                k: obs_adata_manager.get_state_registry(k)
-                for k in obs_adata_manager.data_registry.keys()
-                if k != REGISTRY_KEYS.X_KEY
-            }
-            del obs_adata_manager, obs_anndata_fields, adata_nontransposed
 
-            adata_manager = AnnDataManager(
-                fields=anndata_fields, setup_method_args=setup_method_args
-            )
-            adata_manager.register_fields(adata, **kwargs)
-            cls.register_manager(adata_manager)
-            return cell_specific_vals, cell_specific_state_registry
-        else:
-            # add index for each cell (provided to pyro plate for correct minibatching)
-            adata.obs["_indices"] = np.arange(adata.n_obs).astype("int64")
-
-            # if index for cells that have RNA measurements does not exist assume all cells have RNA
-            if rna_index is None:
-                adata.obs["_rna_index"] = True
-                rna_index = "_rna_index"
-
-            anndata_fields = [
-                LayerField('spliced', spliced_key, is_count_data=True),
-                CategoricalObsField(REGISTRY_KEYS.BATCH_KEY, batch_key),
-                CategoricalObsField(REGISTRY_KEYS.LABELS_KEY, labels_key),
-                CategoricalJointObsField(
-                    REGISTRY_KEYS.CAT_COVS_KEY, categorical_covariate_keys
-                ),
-                NumericalJointObsField(
-                    REGISTRY_KEYS.CONT_COVS_KEY, continuous_covariate_keys
-                ),
-                NumericalObsField(REGISTRY_KEYS.INDICES_KEY, "_indices"),
-                NumericalObsField("rna_index", rna_index),
-            ]
-
-            # annotations for covariates that affect stochastic variance
-            if variance_categories is not None:
-                anndata_fields.append(
-                    CategoricalObsField("var_categoricals", variance_categories)
-                )
-
-            adata_manager = AnnDataManager(
-                fields=anndata_fields, setup_method_args=setup_method_args
-            )
-            adata_manager.register_fields(adata, **kwargs)
-            cls.register_manager(adata_manager)
+        adata_manager = AnnDataManager(
+            fields=anndata_fields, setup_method_args=setup_method_args
+        )
+        adata_manager.register_fields(adata, **kwargs)
+        cls.register_manager(adata_manager)
 
     def train(
         self,
@@ -728,13 +655,12 @@ class ProgrammeModel(
         mu = (
             (mu_biol + obs2sample @ torch.tensor(self.samples['post_sample_means']['s_g_gene_add']))  # contaminating RNA
             * torch.tensor(self.samples['post_sample_means']['detection_y_c'])
-            * (obs2extra_categoricals @ torch.tensor(self.samples['post_sample_means']['detection_tech_gene_tg']))
         )
         adata.obs['log10_MSE'] = torch.log10(torch.mean((mu - torch.tensor(self.adata_manager.get_from_registry('spliced').toarray()))**2, axis = 1))
-        adata.obs['r^2'] = np.array([torch.corrcoef(torch.stack([mu[i,:], torch.tensor(self.adata_manager.get_from_registry('spliced').toarray())[i,:]], axis = 0))[0,1] for i in range(self.module.model.n_obs)])**2
+#         adata.obs['r^2'] = np.array([torch.corrcoef(torch.stack([mu[i,:], torch.tensor(self.adata_manager.get_from_registry('spliced').toarray())[i,:]], axis = 0))[0,1] for i in range(self.module.model.n_obs)])**2
         adata.obs['Total Counts log10 Abs. Diff.'] = torch.log10(torch.abs(torch.sum(mu, axis = 1) - torch.sum(torch.tensor(self.adata_manager.get_from_registry('spliced').toarray()), axis = 1)))
         adata.obs['Total Counts Diff. Sign'] = torch.sum(mu, axis = 1) - torch.sum(torch.tensor(self.adata_manager.get_from_registry('spliced').toarray()), axis = 1)
         adata.obs['Total Counts Diff. Sign'] = torch.sign(torch.sum(mu, axis = 1) - torch.sum(torch.tensor(self.adata_manager.get_from_registry('spliced').toarray())))
         sc.set_figure_params(figsize=(8, 5))
-        sc.pl.umap(adata, color = ['clusters', 'log10_MSE', 'r^2', 'Total Counts log10 Abs. Diff.', 'Total Counts Diff. Sign'],
+        sc.pl.umap(adata, color = ['clusters', 'log10_MSE', 'Total Counts log10 Abs. Diff.', 'Total Counts Diff. Sign'],
                    legend_loc = 'on data', size = 300, color_map = 'cividis', ncols= 3)

@@ -9,6 +9,7 @@ import scanpy as sc
 import random
 import scvelo as scv
 from numpy.linalg import norm
+import scipy
 from scipy.sparse import csr_matrix
 from numpy import inner
 import matplotlib.pyplot as plt
@@ -249,9 +250,8 @@ def plot_velocity_umap_Bergen2020(adata, use_full_posterior = True, n_neighbours
         
         scv.pl.velocity_embedding_stream(adata, basis='umap', save = save, **plotting_kwargs)
 
-def get_training_data(adata, remove_clusters = None, cells_per_cluster = 100000,
-                         cluster_column = 'clusters', min_shared_counts = 20, n_var_genes = 2000,
-                         n_pcs=30, n_neighbors=30):
+def get_training_data(adata, remove_clusters = None, cells_per_cluster = 100,
+                         cluster_column = 'clusters', min_shared_counts = 10, n_var_genes = 2000):
     """
     Reduces and anndata object to the most relevant cells and genes for understanding the differentiation trajectories
     in the data.
@@ -280,6 +280,59 @@ def get_training_data(adata, remove_clusters = None, cells_per_cluster = 100000,
     adata = adata[[c not in remove_clusters for c in adata.obs[cluster_column]], :]
     # Restrict samples per cell type:
     N = cells_per_cluster
+    unique_celltypes = np.unique(adata.obs[cluster_column])
+    index = []
+    for i in range(len(unique_celltypes)):
+        if adata.obs[cluster_column].value_counts()[unique_celltypes[i]] > N:
+            subset = np.where(adata.obs[cluster_column] == unique_celltypes[i])[0]
+            subset = random.sample(list(subset), N)
+        else:
+            subset = np.where(adata.obs[cluster_column] == unique_celltypes[i])[0]
+        index += list(subset)
+    adata = adata[index,:]
+    print('Keeping at most ' + str(N) + ' cells per cluster')
+    scv.pp.filter_genes(adata, min_shared_counts=min_shared_counts)
+    sc.pp.normalize_total(adata, target_sum=1e4)
+    scv.pp.filter_genes_dispersion(adata, n_top_genes=n_var_genes)
+    if scipy.sparse.issparse(adata.layers['spliced']):
+        adata.layers['spliced'] = np.array(adata.layers['spliced'].toarray(), dtype=np.float32)
+    if scipy.sparse.issparse(adata.layers['unspliced']):
+        adata.layers['unspliced'] = np.array(adata.layers['unspliced'].toarray(), dtype=np.float32)
+    return adata
+        
+def get_training_data_version2(adata, remove_clusters = None, cells_per_cluster = 100000,
+                         cluster_column = 'clusters', min_shared_counts = 20, n_var_genes = 2000,
+                         n_pcs=30, n_neighbors=30):
+    """
+    Reduces and anndata object to the most relevant cells and genes for understanding the differentiation trajectories
+    in the data.
+    
+    Parameters
+    ----------
+    adata
+        anndata
+    remove_clusters
+        names of clusters to be removed
+    cells_per_cluster
+        how many cells to keep per cluster. For Louvain clustering with resolution = 1, keeping more than 300 cells
+        per cluster does not provide much extra information.
+    cluster_column
+        name of the column in adata.obs that contains cluster names
+    min_shared_counts
+        minimum number of spliced+unspliced counts across all cells for a gene to be retained
+    n_var_genes
+        number of top variable genes to retain
+        
+    Returns
+    -------
+    adata object reduced to the most informative cells and genes
+    """
+    total_spliced = np.sum(adata.layers['spliced'], axis = 1)
+    total_unspliced = np.sum(adata.layers['unspliced'], axis = 1)
+    random.seed(a=1)
+    adata = adata[[c not in remove_clusters for c in adata.obs[cluster_column]], :]
+    # Restrict samples per cell type:
+    N = cells_per_cluster
     print('Keeping at most ' + str(N) + ' cells per cluster')
     unique_celltypes = np.unique(adata.obs[cluster_column])
     index = []
@@ -292,10 +345,12 @@ def get_training_data(adata, remove_clusters = None, cells_per_cluster = 100000,
         index += list(subset)
     adata = adata[index,:]
     print("Saving raw counts in adata.layers['spliced_raw'] and adata.layers['unspliced_raw']")
-    adata.layers['spliced_raw'] = adata.layers['spliced']
+    adata.layers['spliced_raw'] = adata.layers['spliced'] 
     adata.layers['unspliced_raw'] = adata.layers['unspliced']
     scv.pp.filter_and_normalize(adata, min_shared_counts=min_shared_counts, n_top_genes=n_var_genes)
     scv.pp.moments(adata, n_pcs=30, n_neighbors=30)
+    adata.obs['spliced_fraction_retained'] = np.sum(adata.layers['spliced_raw'], axis = 1)/total_spliced[index]
+    adata.obs['unspliced_fraction_retained'] = np.sum(adata.layers['unspliced_raw'], axis = 1)/total_unspliced[index]
     return adata
 
 def add_prior_knowledge(adata, cluster_column, initial_stages = None, initial_stages_lineage = None,
@@ -934,7 +989,7 @@ def mu_mRNA_discreteModularAlpha_localTime_4States(
     # total unspliced + spliced counts in each cell:
     mu_cg = torch.stack([Zeros, Zeros], axis = -1)    
     for m in range(n_modules):
-        # (Also sum over possible activation states of modules given by I_cm)
+        # (Sum over possible activation states of modules given by I_cm)
         ## OFF STATE ###
         mu_cmg = torch.stack([Zeros, Zeros], axis = -1)
         ### ON STATE ###

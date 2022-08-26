@@ -11,9 +11,6 @@ from pyro.nn import PyroModule
 from scvi import REGISTRY_KEYS
 from scvi.nn import one_hot
 from torch.distributions import biject_to, transform_to
-from pyro.distributions import RelaxedBernoulliStraightThrough
-RelaxedBernoulliStraightThrough.mean = property(lambda self: self.probs)
-from cell2fate.utils import G_a, G_b
 
 class _ExpPositive(type(constraints.positive)):
     def __init__(self):
@@ -56,15 +53,18 @@ class MeanProgrammePyroModel(PyroModule):
         self,
         n_obs,
         n_vars,
+        n_factors,
         n_batch,
         n_extra_categoricals,
         n_var_categoricals,
         gene_bool: np.array,
-        n_factors = 30,
-        n_factors_per_cell = 3,
-        n_factors_per_gene = 1,
-        factor_level_prior_alpha = 1.0,
-        g_fg_target_prior_alpha = 10.,
+        factor_number_prior={"factors_per_cell": 10.0, "mean_var_ratio": 1.0},
+        factor_prior={
+            "rate": 1.0,
+            "alpha": 1.0,
+            "states_per_gene": 10.0,
+            "states_per_region": 10.0,
+        },
         stochastic_v_ag_hyp_prior={"alpha": 9.0, "beta": 3.0},
         gene_add_alpha_hyp_prior={"alpha": 9.0, "beta": 3.0},
         gene_add_mean_hyp_prior={
@@ -77,10 +77,9 @@ class MeanProgrammePyroModel(PyroModule):
         init_vals: Optional[dict] = None,
         init_alpha=10.0,
         rna_model: bool = True,
+        use_detection_probability: bool = False,
         use_exp_positive: bool = False,
-        p_f_prior = {"alpha": 1., "beta": 9.},
-        p_g_prior = {"alpha": 1., "beta": 9.},
-        w_cf_active_prior = {"alpha": 3.33, "beta": 1.11},
+        w_cf_prior = {"alpha": 0.25, "beta": 1.0}
     ):
         """
 
@@ -110,11 +109,15 @@ class MeanProgrammePyroModel(PyroModule):
         self.n_batch = n_batch
         self.n_extra_categoricals = n_extra_categoricals
         self.n_var_categoricals = n_var_categoricals
+        self.use_detection_probability = use_detection_probability
         self.use_exp_positive = use_exp_positive
-
+        self.w_cf_prior = w_cf_prior
+        self.detection_hyp_prior = detection_hyp_prior
+        
         self.gene_bool = gene_bool.astype(int).flatten()
         self.gene_ind = np.where(gene_bool)[0]
         self.n_genes = len(self.gene_ind)
+        self.register_buffer("gene_ind_tt", torch.tensor(self.gene_ind))
 
         self.region_ind = np.where(np.logical_not(gene_bool))[0]
         self.n_regions = self.n_vars - self.n_genes
@@ -125,12 +128,14 @@ class MeanProgrammePyroModel(PyroModule):
         self.gene_add_alpha_hyp_prior = gene_add_alpha_hyp_prior
         self.gene_add_mean_hyp_prior = gene_add_mean_hyp_prior
         self.gene_tech_prior = gene_tech_prior
-        self.g_fg_target_prior_alpha = g_fg_target_prior_alpha
-        self.factor_level_prior_alpha = factor_level_prior_alpha
+
+        # Shared priors
+        if self.use_detection_probability:
+            detection_hyp_prior["alpha"] = detection_hyp_prior["alpha"] * 10
         self.detection_hyp_prior = detection_hyp_prior
-        self.p_f_prior = p_f_prior
-        self.p_g_prior = p_g_prior
-        self.w_cf_active_prior = w_cf_active_prior
+
+        self.factor_number_prior = factor_number_prior
+        self.factor_prior = factor_prior
 
         # Fixed values (gene loadings or cell loadings)
         if (fixed_vals is not None) & (type(fixed_vals) is dict):
@@ -149,7 +154,7 @@ class MeanProgrammePyroModel(PyroModule):
                 self.register_buffer(f"init_val_{k}", torch.tensor(init_vals[k]))
             self.init_alpha = init_alpha
             self.register_buffer("init_alpha_tt", torch.tensor(self.init_alpha))
-
+        
         # Shared priors
         self.register_buffer(
             "alpha_experiments",
@@ -164,20 +169,40 @@ class MeanProgrammePyroModel(PyroModule):
             torch.tensor(self.detection_hyp_prior["expected_probability"]),
         )
 
+        # per cell programme activity priors
+        self.register_buffer(
+            "factors_per_cell_alpha",
+            torch.tensor(self.factor_number_prior["factors_per_cell"])
+            * torch.tensor(self.factor_number_prior["mean_var_ratio"]),
+        )
+        self.register_buffer(
+            "factors_per_cell_beta",
+            torch.tensor(self.factor_number_prior["mean_var_ratio"]),
+        )
+
         # per gene rate priors
         self.register_buffer(
-            "factor_level_alpha",
-            torch.tensor(self.factor_level_prior_alpha),
+            "factor_prior_alpha",
+            torch.tensor(self.factor_prior["alpha"]),
         )
-        
         self.register_buffer(
-            "n_factors_per_cell",
-            torch.tensor(n_factors_per_cell),
+            "factor_prior_beta",
+            torch.tensor(self.factor_prior["alpha"] / self.factor_prior["rate"]),
         )
-        
+
+        # RNA model priors
         self.register_buffer(
-            "n_factors_per_gene",
-            torch.tensor(n_factors_per_cell),
+            "factor_states_per_gene",
+            torch.tensor(self.factor_prior["states_per_gene"]),
+        )
+
+        self.register_buffer(
+            "gene_tech_prior_alpha",
+            torch.tensor(self.gene_tech_prior["alpha"]),
+        )
+        self.register_buffer(
+            "gene_tech_prior_beta",
+            torch.tensor(self.gene_tech_prior["alpha"] / self.gene_tech_prior["mean"]),
         )
 
         self.register_buffer(
@@ -206,47 +231,14 @@ class MeanProgrammePyroModel(PyroModule):
         )
         
         self.register_buffer(
-            "p_f_alpha",
-            torch.tensor(self.p_f_prior["alpha"]),
+            "w_cf_alpha",
+            torch.tensor(self.w_cf_prior["alpha"]),
         )
         self.register_buffer(
-            "p_f_beta",
-            torch.tensor(self.p_f_prior["beta"]),
+            "w_cf_beta",
+            torch.tensor(self.w_cf_prior["beta"]),
         )
-        
-        self.register_buffer(
-            "p_g_alpha",
-            torch.tensor(self.p_g_prior["alpha"]),
-        )
-        self.register_buffer(
-            "p_g_beta",
-            torch.tensor(self.p_g_prior["beta"]),
-        )
-        
-        self.register_buffer(
-            "w_cf_active_alpha",
-            torch.tensor(self.w_cf_active_prior["alpha"]),
-        )
-        self.register_buffer(
-            "w_cf_active_beta",
-            torch.tensor(self.w_cf_active_prior["beta"]),
-        )
-        
-        self.register_buffer(
-            "g_fg_target_alpha",
-            torch.tensor(self.g_fg_target_prior_alpha),
-        )
-        
-        self.register_buffer(
-            "total_mRNA_mean",
-            torch.tensor(1.6*10**5),
-        )
-        
-        self.register_buffer(
-            "total_mRNA_sd",
-            torch.tensor(4*10**4),
-        )
-        
+
         self.register_buffer("ones", torch.ones((1, 1)))
         self.register_buffer("zeros", torch.zeros((1, 1)))
         self.register_buffer("n_factors_torch", torch.tensor(self.n_factors))
@@ -264,7 +256,6 @@ class MeanProgrammePyroModel(PyroModule):
         rna_index = tensor_dict["rna_index"].bool()
         extra_categoricals = tensor_dict[REGISTRY_KEYS.CAT_COVS_KEY]
         var_categoricals = tensor_dict["var_categoricals"].long()
-        fraction_retained = tensor_dict["fraction_retained"]
         return (
             x_data,
             ind_x,
@@ -273,7 +264,6 @@ class MeanProgrammePyroModel(PyroModule):
             rna_index,
             extra_categoricals,
             var_categoricals,
-            fraction_retained
         ), {}
 
     def create_plates(
@@ -285,7 +275,6 @@ class MeanProgrammePyroModel(PyroModule):
         rna_index,
         extra_categoricals,
         var_categoricals,
-        fraction_retained
     ):
         return pyro.plate("obs_plate", size=self.n_obs, dim=-2, subsample=idx)
 
@@ -324,10 +313,7 @@ class MeanProgrammePyroModel(PyroModule):
         rna_index,
         extra_categoricals,
         var_categoricals,
-        fraction_retained
     ):
-        
-        r = torch.mean(fraction_retained)
         
         batch_size = len(idx)
         obs2sample = one_hot(batch_index, self.n_batch)
@@ -350,7 +336,6 @@ class MeanProgrammePyroModel(PyroModule):
             rna_index,
             extra_categoricals,
             var_categoricals,
-            fraction_retained
         )
 
         def apply_plate_to_fixed(x, index):
@@ -360,27 +345,14 @@ class MeanProgrammePyroModel(PyroModule):
                 return x
 
         # =====================Cell-specific programme activities ======================= #
-#         p_f = pyro.sample('p_f', dist.Beta(self.p_f_alpha,
-#                                            self.p_f_beta
-#                                           ).expand([1, self.n_factors]).to_event(2))
-        
-        p_f = self.n_factors_per_cell/self.n_factors
-        
+        # programme per cell activities - w_{c, f1}
         with obs_plate as ind:
-            I_cf = pyro.sample('I_cf',
-                   RelaxedBernoulliStraightThrough(probs = p_f,
-                                                   temperature = self.one/1000.
-                                                   ).expand([batch_size, self.n_factors]))
-            w_cf_active = pyro.sample('w_cf_active', 
+            cell_factors_w_cf = pyro.sample("cell_factors_w_cf", 
                 dist.Beta(
-                self.w_cf_active_alpha,
-                self.w_cf_active_beta,
+                self.w_cf_alpha,
+                self.w_cf_beta,
             ).expand([batch_size, self.n_factors]))
             
-        cell_factors_w_cf = pyro.deterministic(
-            "cell_factors_w_cf",
-            I_cf * w_cf_active)
-
         # =====================Cell-specific detection efficiency ======================= #
         ### RNA model ###
         # y_c with hierarchical mean prior
@@ -409,47 +381,37 @@ class MeanProgrammePyroModel(PyroModule):
                 dist.Beta(alpha_y, beta_y),
             )  # (self.n_obs, 1)
 
-        # ===================== Gene programmes ======================== #
-        # (set prior so that gene expression produces realistic total counts)
-        total_mRNA = pyro.sample('total_mRNA', 
-                                 dist.Gamma(
-                                 G_a(self.total_mRNA_mean, self.total_mRNA_sd),
-                                 G_b(self.total_mRNA_mean, self.total_mRNA_sd)))
-                                      
-        mean_factor_level =  r * total_mRNA / (self.n_genes * self.n_factors  
-                                          * self.p_f_alpha / (self.p_f_alpha + self.p_f_beta)  
-                                          * self.p_g_alpha / (self.p_g_alpha + self.p_g_beta) 
-                                          * self.w_cf_active_alpha / (self.w_cf_active_alpha + self.w_cf_active_beta))
-        
-#         p_g = pyro.sample('p_g', dist.Beta(self.p_g_alpha,
-#                                            self.p_g_beta
-#                                           ).expand([1, self.n_genes]).to_event(2))
-
-        p_g = self.n_factors_per_gene/self.n_factors
-
-        I_fg = pyro.sample('I_fg',
-               RelaxedBernoulliStraightThrough(probs = p_g,
-                                               temperature = self.one/1000.
-                                               ).expand([self.n_factors, self.n_genes]).to_event(2))
-        
-        self.factor_level_beta = self.factor_level_alpha/mean_factor_level
-        
+        # g_{f,g}
         factor_level_g = pyro.sample(
             "factor_level_g",
-            dist.Gamma(self.factor_level_alpha, self.factor_level_beta)
+            dist.Gamma(self.factor_prior_alpha, self.factor_prior_beta)
             .expand([1, self.n_genes])
-            .to_event(2)
+            .to_event(2),
+            obs=getattr(self, "fixed_val_factor_level_g", None),
         )
-        g_fg_target = pyro.sample(
-            "g_fg_target",
-            dist.Beta(
-                self.g_fg_target_alpha,
-                self.g_fg_target_alpha/factor_level_g,
+        g_fg = pyro.sample(
+            "g_fg",
+            dist.Gamma(
+                self.factor_states_per_gene / self.n_factors_torch,
+                self.ones / factor_level_g,
             )
             .expand([self.n_factors, self.n_genes])
-            .to_event(2))
-                          
-        g_fg = pyro.deterministic("g_fg", I_fg * g_fg_target)
+            .to_event(2),
+            obs=getattr(self, "fixed_val_g_fg", None),
+        )
+
+        # =====================Gene-specific multiplicative component ======================= #
+        # `y_{t, g}` per gene multiplicative effect that explains the difference
+        # in sensitivity between genes in each technology or covariate effect
+        detection_tech_gene_tg = pyro.sample(
+            "detection_tech_gene_tg",
+            dist.Gamma(
+                self.ones * self.gene_tech_prior_alpha,
+                self.ones * self.gene_tech_prior_beta,
+            )
+            .expand([np.sum(self.n_extra_categoricals), self.n_genes])
+            .to_event(2),
+        )
 
         # =====================Gene-specific additive component ======================= #
         # s_{e,g} accounting for background, free-floating RNA
@@ -501,23 +463,37 @@ class MeanProgrammePyroModel(PyroModule):
         stochastic_v_ag_inv = pyro.sample(
             "stochastic_v_ag_inv",
             dist.Exponential(stochastic_v_ag_hyp)
+            # dist.Exponential(
+            #    self.stochastic_v_ag_hyp_prior_alpha
+            #    / self.stochastic_v_ag_hyp_prior_beta
+            # )
             .expand([self.n_var_categoricals, self.n_genes]).to_event(2),
         )  # (self.n_var_categoricals or 1, self.n_genes)
         stochastic_v_ag = obs2var_categoricals @ (
             self.ones / stochastic_v_ag_inv.pow(2)
-        )   
+        )
+
+        # =====================Expected expression ======================= #
+        if not self.training_wo_data:
+            ### RNA model ###
+            # per cell biological expression
+            mu_biol = cell_factors_w_cf @ g_fg
+            # biological expression mediated by bursting
+            mu = (
+                (mu_biol + obs2sample @ s_g_gene_add)  # contaminating RNA
+                * detection_y_c
+                * (obs2extra_categoricals @ detection_tech_gene_tg)
+            )  # cell and gene-specific normalisation
 
         # =====================DATA likelihood ======================= #
-        # per cell biological expression
-        mu_biol = cell_factors_w_cf @ g_fg
-        # biological expression mediated by bursting
-        mu = (
-            (mu_biol + obs2sample @ s_g_gene_add)  # contaminating RNA
-            * detection_y_c)  # cell specific normalisation                     
-                          
-        with obs_plate:
-            pyro.sample(
-                "data_rna",
-                dist.GammaPoisson(
-                    concentration=stochastic_v_ag, rate=stochastic_v_ag / mu),
-                obs=x_data)
+        ### RNA model ###
+              
+        if not self.training_wo_data:
+            # Likelihood (switch / 2 state model)
+            with obs_plate, pyro.poutine.mask(mask=rna_index):
+                pyro.sample(
+                    "data_rna",
+                    dist.GammaPoisson(
+                        concentration=stochastic_v_ag, rate=stochastic_v_ag / mu
+                    ),
+                    obs=x_data[:, self.gene_ind_tt],)
