@@ -38,10 +38,10 @@ class Cell2fate_ModularTranscriptionRate_module_SingleLineage_GlobalTime(PyroMod
         stochastic_v_ag_hyp_prior={"alpha": 9.0, "beta": 3.0},
         factor_prior={"rate": 1.0, "alpha": 1.0, "states_per_gene": 3.0},
         t_switch_alpha_prior = {"mean": 1000., "alpha": 1000.},
-        splicing_rate_hyp_prior={"mean_hyp_prior_mean": 1.0, "mean_hyp_prior_sd": 0.4,
-                                 "sd_hyp_prior_mean": 0.1, "sd_hyp_prior_sd": 0.05},
-        degredation_rate_hyp_prior={"mean_hyp_prior_mean": 0.25, "mean_hyp_prior_sd": 0.1,
-                                    "sd_hyp_prior_mean": 0.1, "sd_hyp_prior_sd": 0.05},
+        splicing_rate_hyp_prior={"mean_hyp_prior_mean": 1.0, "mean_hyp_prior_sd": 0.25,
+                                 "sd_hyp_prior_mean": 0.25, "sd_hyp_prior_sd": 0.05},
+        degredation_rate_hyp_prior={"mean_hyp_prior_mean": 1.0, "mean_hyp_prior_sd": 0.25,
+                                    "sd_hyp_prior_mean": 0.33, "sd_hyp_prior_sd": 0.1},
         activation_rate_hyp_prior={"mean_hyp_prior_mean": 2.0, "mean_hyp_prior_sd": 0.33,
                                     "sd_hyp_prior_mean": 0.33, "sd_hyp_prior_sd": 0.1},
         s_overdispersion_factor_hyp_prior={'alpha_mean': 100., 'beta_mean': 1.,
@@ -302,7 +302,7 @@ class Cell2fate_ModularTranscriptionRate_module_SingleLineage_GlobalTime(PyroMod
             
         self.register_buffer(
             "t_mOFF_init",
-            self.one*torch.ones((1, self.n_modules, 1))/(2.*self.one),
+            self.one*torch.ones((1, self.n_modules, 1))*0.95,
         )      
             
     ############# Define the model ################

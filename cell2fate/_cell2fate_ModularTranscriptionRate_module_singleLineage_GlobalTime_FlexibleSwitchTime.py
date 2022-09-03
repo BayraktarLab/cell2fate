@@ -401,18 +401,19 @@ class Cell2fate_ModularTranscriptionRate_module_SingleLineage_GlobalTime_Flexibl
         lam_mi = pyro.sample('lam_mi', dist.Gamma(G_a(lam_m_mu, lam_m_mu*0.05),
                                             G_b(lam_m_mu, lam_m_mu*0.05)).expand([self.n_modules, 1, 2]).to_event(3))
         
-        # =============== Activity of modules ============ #
-        # (To be inferred with RelaxedBernoulliStraightThrough in the future)
-        with obs_plate:
-            I_cm = pyro.sample('I_cm', RelaxedBernoulli(probs = self.probs_I_cm, temperature = self.one/10**10
-                                                              ).expand([self.n_obs, 1, self.n_modules]))
+#         # =============== Activity of modules ============ #
+#         # (To be inferred with RelaxedBernoulliStraightThrough in the future)
+#         with obs_plate:
+#             I_cm = pyro.sample('I_cm', RelaxedBernoulli(probs = self.probs_I_cm, temperature = self.one/10**10
+#                                                               ).expand([self.n_obs, 1, self.n_modules]))
             
         # =====================Time======================= #
         # Global time for each cell:
-        Tmax = pyro.deterministic('Tmax', self.one*1000.)
+        Tmax = pyro.sample('Tmax', dist.Gamma(self.one * 1000., self.one*1000./500.))
+        t_c_mean = pyro.sample('t_c_mean', dist.Gamma(self.one, self.one/0.5))
+        t_c_alpha = pyro.sample('t_c_alpha', dist.Gamma(self.one, self.one))
         with obs_plate:
-            t_c = pyro.sample('t_c', dist.Gamma(G_a(self.one/2., self.one/4.),
-                                                G_b(self.one/2., self.one/4.)))
+            t_c = pyro.sample('t_c', dist.Gamma(t_c_alpha, t_c_alpha/t_c_mean))
 #         t_c = pyro.param('t_c', self.t_c_init, constraint=constraints.interval(0.01, 1.))
         T_c = pyro.deterministic('T_c', t_c*Tmax)
         t_mON = pyro.param('t_mON', self.t_mON_init, constraint=constraints.positive)
@@ -422,10 +423,10 @@ class Cell2fate_ModularTranscriptionRate_module_SingleLineage_GlobalTime_Flexibl
         T_mOFF = pyro.deterministic('T_mOFF', T_mON + t_mOFF*Tmax)
         
         # =========== Mean expression according to RNAvelocity model ======================= #
-        # (summing over all independent modules)
+        # (summing over all independent modules) I_cm[idx,:,m].unsqueeze(-1)*
         mu_total = torch.stack([self.zeros[idx,...], self.zeros[idx,...]], axis = -1)
         for m in range(self.n_modules):
-            mu_total += I_cm[idx,:,m].unsqueeze(-1)*mu_mRNA_continousAlpha_globalTime_twoStates(
+            mu_total += mu_mRNA_continousAlpha_globalTime_twoStates(
                 A_mgON[m,:], A_mgOFF, beta_g, gamma_g, lam_mi[m,...], T_c[:,:,0], T_mON[:,:,m], T_mOFF[:,:,m], self.zeros[idx,...])
         mu_expression = pyro.deterministic('mu_expression', mu_total)
         

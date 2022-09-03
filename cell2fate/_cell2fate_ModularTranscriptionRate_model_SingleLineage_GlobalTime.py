@@ -193,7 +193,7 @@ class Cell2fate_ModularTranscriptionRate_model_SingleLineage_GlobalTime(Quantile
                           torch.tensor(self.adata_manager.get_from_registry('spliced'))], axis = -1), axis = -1), axis = -1)
         inferred_total = torch.sum(torch.sum(torch.tensor(self.samples['post_sample_means']['mu_expression']), axis = -1), axis = -1)
         for m in range(self.module.model.n_modules):
-            mu_m = torch.tensor(self.samples['post_sample_means']['I_cm'][:,m]).unsqueeze(-1).unsqueeze(-1)*mu_mRNA_continousAlpha_globalTime_twoStates(
+            mu_m = mu_mRNA_continousAlpha_globalTime_twoStates(
                 torch.tensor(self.samples['post_sample_means']['A_mgON'][m,:]),
                 torch.tensor(0.),
                 torch.tensor(self.samples['post_sample_means']['beta_g']),
@@ -358,7 +358,7 @@ class Cell2fate_ModularTranscriptionRate_model_SingleLineage_GlobalTime(Quantile
         for m in range(n_modules):
             print('Computing velocity produced by Module ' + str(m) + ' ...')
     #         with contextlib.redirect_stdout(io.StringIO()):
-            mu_m = torch.tensor(self.samples['post_sample_means']['I_cm'][:,m], dtype = torch.float).unsqueeze(-1).unsqueeze(-1)*mu_mRNA_continousAlpha_globalTime_twoStates(
+            mu_m = mu_mRNA_continousAlpha_globalTime_twoStates(
                         torch.tensor(self.samples['post_sample_means']['A_mgON'][m,:]),
                         torch.tensor(0., dtype = torch.float),
                         torch.tensor(self.samples['post_sample_means']['beta_g']),
@@ -454,7 +454,7 @@ class Cell2fate_ModularTranscriptionRate_model_SingleLineage_GlobalTime(Quantile
             ax[1].set_ylabel('Fraction of Steady State')
             ax[1].legend(frameon=False)
             ax[1].set_title('(Hypothetical) Module Activation Until Steady State')
-            abundance = torch.sum(torch.tensor(self.samples['post_sample_means']['I_cm'][:,m]).unsqueeze(-1)*mu_mRNA_continousAlpha_globalTime_twoStates(
+            abundance = torch.sum(mu_mRNA_continousAlpha_globalTime_twoStates(
                     torch.tensor(self.samples['post_sample_means']['A_mgON'][m,:]),
                     torch.tensor(0.),
                     torch.tensor(self.samples['post_sample_means']['beta_g']),
