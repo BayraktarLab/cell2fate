@@ -30,13 +30,13 @@ import gseapy as gp
 
 from cell2fate._pyro_base_cell2fate_module import Cell2FateBaseModule
 from cell2fate._pyro_mixin import PltExportMixin, QuantileMixin
-from ._cell2fate_ModularTranscriptionRate_module_singleLineage_GlobalTime_FlexibleSwitchTime import \
-Cell2fate_ModularTranscriptionRate_module_SingleLineage_GlobalTime_FlexibleSwitchTime
+from ._cell2fate_ModularTranscriptionRate_module_singleLineage_GlobalTime_InformativeGlobalTimePrior_RelaxedCategorical import \
+Cell2fate_ModularTranscriptionRate_module_SingleLineage_GlobalTime
 from cell2fate.utils import multiplot_from_generator
 
 from cell2fate.utils import mu_mRNA_continousAlpha_globalTime_twoStates
 
-class Cell2fate_ModularTranscriptionRate_model_SingleLineage_GlobalTime(QuantileMixin, PyroSampleMixin, PyroSviTrainMixin, PltExportMixin, BaseModelClass):
+class Cell2fate_ModularTranscriptionRate_MixtureModel(QuantileMixin, PyroSampleMixin, PyroSviTrainMixin, PltExportMixin, BaseModelClass):
     """
     Cell2fate model. User-end model class. See Module class for description of the model.
 
@@ -66,7 +66,7 @@ class Cell2fate_ModularTranscriptionRate_model_SingleLineage_GlobalTime(Quantile
         super().__init__(adata)
 
         if model_class is None:
-            model_class = Cell2fate_ModularTranscriptionRate_module_SingleLineage_GlobalTime_FlexibleSwitchTime
+            model_class = Cell2fate_ModularTranscriptionRate_module_SingleLineage_GlobalTime
 
         self.module = Cell2FateBaseModule(
             model=model_class,
@@ -199,9 +199,9 @@ class Cell2fate_ModularTranscriptionRate_model_SingleLineage_GlobalTime(Quantile
                 torch.tensor(self.samples['post_sample_means']['beta_g']),
                 torch.tensor(self.samples['post_sample_means']['gamma_g']),
                 torch.tensor(self.samples['post_sample_means']['lam_mi'][m,:]),
-                torch.tensor(self.samples['post_sample_means']['T_c'][:,:,0]),
-                torch.tensor(self.samples['post_sample_means']['T_mON'][:,:,m]),
-                torch.tensor(self.samples['post_sample_means']['T_mOFF'][:,:,m]),
+                torch.tensor(self.samples['post_sample_means']['T_cm'][:,m,:]),
+                torch.tensor(self.samples['post_sample_means']['T_mON'][:,m,:]),
+                torch.tensor(self.samples['post_sample_means']['T_mOFF'][:,m,:]),
                 torch.zeros((self.module.model.n_obs, self.module.model.n_vars)))
             adata.obs['Module ' + str(m) + ' Weight'] = torch.clip(torch.sum(torch.sum(mu_m, axis = -1), axis = -1)/inferred_total,
                                                                    min = 0.0, max = 1.0)
@@ -210,10 +210,10 @@ class Cell2fate_ModularTranscriptionRate_model_SingleLineage_GlobalTime(Quantile
             adata.obs['Module ' + str(m) + ' Activation'] = torch.sum(torch.sum(mu_m, axis = -1), axis = -1)/ss_total
             adata.obs['Module ' + str(m) + ' State'] = 'OFF'
             adata.obs['Module ' + str(m) + ' State'
-             ][self.samples['post_sample_means']['T_c'][:,0,0] > self.samples['post_sample_means']['T_mON'][0,0,m]
+             ][self.samples['post_sample_means']['T_cm'][:,m,0] > self.samples['post_sample_means']['T_mON'][:,m,0]
               ] = 'Induction'
             adata.obs['Module ' + str(m) + ' State'
-             ][self.samples['post_sample_means']['T_c'][:,0,0] > self.samples['post_sample_means']['T_mOFF'][0,0,m]
+             ][self.samples['post_sample_means']['T_cm'][:,m,0] > self.samples['post_sample_means']['T_mOFF'][:,m,0]
               ] = 'Repression'
             adata.obs['Module ' + str(m) + ' State'
              ][adata.obs['Module ' + str(m) + ' Activation'] > 0.99
@@ -287,8 +287,8 @@ class Cell2fate_ModularTranscriptionRate_model_SingleLineage_GlobalTime(Quantile
             print('Warning: Saving ALL posterior samples. Specify "return_samples: False" to save just summary statistics.')
             adata.uns[export_slot]['post_samples'] = self.samples['posterior_samples']
 
-        adata.obs['Time (hours)'] = self.samples['post_sample_means']['T_c'].flatten() - np.min(self.samples['post_sample_means']['T_c'].flatten())
-        adata.obs['Time Uncertainty (sd)'] = self.samples['post_sample_stds']['T_c'].flatten()
+#         adata.obs['Time (hours)'] = self.samples['post_sample_means']['T_c'].flatten() - np.min(self.samples['post_sample_means']['T_c'].flatten())
+#         adata.obs['Time Uncertainty (sd)'] = self.samples['post_sample_stds']['T_c'].flatten()
 
         return adata
 
@@ -364,9 +364,9 @@ class Cell2fate_ModularTranscriptionRate_model_SingleLineage_GlobalTime(Quantile
                         torch.tensor(self.samples['post_sample_means']['beta_g']),
                         torch.tensor(self.samples['post_sample_means']['gamma_g']),
                         torch.tensor(self.samples['post_sample_means']['lam_mi'][m,:]),
-                        torch.tensor(self.samples['post_sample_means']['T_c'][:,:,0]),
-                        torch.tensor(self.samples['post_sample_means']['T_mON'][:,:,m]),
-                        torch.tensor(self.samples['post_sample_means']['T_mOFF'][:,:,m]),
+                        torch.tensor(self.samples['post_sample_means']['T_cm'][:,m,:]),
+                        torch.tensor(self.samples['post_sample_means']['T_mON'][:,m,:]),
+                        torch.tensor(self.samples['post_sample_means']['T_mOFF'][:,m,:]),
                         torch.zeros((self.module.model.n_obs, self.module.model.n_vars)))
             count_sum = torch.sum(torch.sum(mu_m, axis = 1), axis = -1)
             n_problem_cells = torch.sum(count_sum == torch.min(count_sum))
@@ -425,7 +425,7 @@ class Cell2fate_ModularTranscriptionRate_model_SingleLineage_GlobalTime(Quantile
         fig, ax = plt.subplots(1, 3, figsize=(18, 5))
         for m in range(n_modules):
             T_c = torch.tensor(0.).unsqueeze(-1).unsqueeze(-1)
-            Tmax = self.samples['post_sample_means']['Tmax']
+            Tmax = self.samples['post_sample_means']['Tmax'][0,m,0]
             count = 0
             fraction = 0
             fraction_list = [fraction]
@@ -460,21 +460,21 @@ class Cell2fate_ModularTranscriptionRate_model_SingleLineage_GlobalTime(Quantile
                     torch.tensor(self.samples['post_sample_means']['beta_g']),
                     torch.tensor(self.samples['post_sample_means']['gamma_g']),
                     torch.tensor(self.samples['post_sample_means']['lam_mi'][m,:]),
-                    torch.tensor(self.samples['post_sample_means']['T_c'][:,:,0]),
-                    torch.tensor(np.mean(self.samples['post_sample_means']['T_mON'][:,:,m])),
-                    torch.tensor(np.mean(self.samples['post_sample_means']['T_mOFF'][:,:,m])),
+                    torch.tensor(self.samples['post_sample_means']['T_cm'][:,m,:]),
+                    torch.tensor(np.mean(self.samples['post_sample_means']['T_mON'][:,m,:])),
+                    torch.tensor(np.mean(self.samples['post_sample_means']['T_mOFF'][:,m,:])),
                     torch.zeros((self.module.model.n_obs, self.module.model.n_vars)))[...,1], axis = -1)
-            ax[0].scatter(self.samples['post_sample_means']['T_c'][:,:,0].flatten() - np.min(self.samples['post_sample_means']['T_c'][:,:,0].flatten()),
+            ax[0].scatter(self.samples['post_sample_means']['T_cm'][:,m,0].flatten() - np.min(self.samples['post_sample_means']['T_cm'][:,m,0].flatten()),
                             abundance, s = 10, label = 'Module ' + str(m))
             ax[0].set_xlabel('Time (hours)')
             ax[0].set_ylabel('Total Spliced Counts')
             ax[0].legend(frameon=False)
             ax[0].set_title('(Real) Mean Module Activation In Dataset')
 
-            T_min = np.min(self.samples['post_sample_means']['T_c'][:,:,0].flatten())
-            T_max = np.max(self.samples['post_sample_means']['T_c'][:,:,0].flatten()) - T_min
-            T_ON = self.samples['post_sample_means']['T_mON'][:,:,m].flatten() - T_min
-            T_OFF = self.samples['post_sample_means']['T_mOFF'][:,:,m].flatten() - T_min
+            T_min = np.min(self.samples['post_sample_means']['T_cm'][:,m,0].flatten())
+            T_max = np.max(self.samples['post_sample_means']['T_cm'][:,m,0].flatten()) - T_min
+            T_ON = self.samples['post_sample_means']['T_mON'][:,m,:].flatten() - T_min
+            T_OFF = self.samples['post_sample_means']['T_mOFF'][:,m,:].flatten() - T_min
             ax[2].scatter(T_ON, T_OFF, alpha = 0.05, label = 'Module ' + str(m))
             ax[2].set_ylabel('T_mOFF')
             ax[2].set_xlabel('T_mON')
@@ -571,9 +571,9 @@ class Cell2fate_ModularTranscriptionRate_model_SingleLineage_GlobalTime(Quantile
                 torch.tensor(self.samples['post_sample_means']['beta_g']),
                 torch.tensor(self.samples['post_sample_means']['gamma_g']),
                 torch.tensor(self.samples['post_sample_means']['lam_mi'][m,:]),
-                torch.tensor(self.samples['post_sample_means']['T_c'][:,:,0]),
-                torch.tensor(self.samples['post_sample_means']['T_mON'][:,:,m]),
-                torch.tensor(self.samples['post_sample_means']['T_mOFF'][:,:,m]),
+                torch.tensor(self.samples['post_sample_means']['T_cm'][:,m,:]),
+                torch.tensor(self.samples['post_sample_means']['T_mON'][:,m,:]),
+                torch.tensor(self.samples['post_sample_means']['T_mOFF'][:,m,:]),
                 torch.zeros((self.module.model.n_obs, self.module.model.n_vars)))
             gene_by_module_weight[m,:] = torch.sum(mu_m[...,1], axis = 0)/inferred_total
             gene_by_module_sorted[m,:] = adata.var_names[np.argsort(-1*gene_by_module_weight[m,:])]

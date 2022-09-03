@@ -391,7 +391,7 @@ class MeanProgrammePyroModel(PyroModule):
         # per cell biological expression
         mu_biol = cell_factors_w_cf @ g_fg
         # biological expression mediated by bursting
-        mu = (
+        mu = pyro.deterministic('mu',
             (mu_biol + obs2sample @ s_g_gene_add)  # contaminating RNA
             * detection_y_c
         )  # cell-specific normalisation only for now

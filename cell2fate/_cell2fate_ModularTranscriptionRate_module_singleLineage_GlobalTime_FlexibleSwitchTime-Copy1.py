@@ -11,10 +11,9 @@ from scvi.nn import one_hot
 from cell2fate.utils import G_a, G_b, mu_mRNA_continousAlpha_globalTime_twoStates
 from pyro.infer import config_enumerate
 from pyro.ops.indexing import Vindex
-from torch.distributions import constraints
 
-from pyro.distributions import RelaxedBernoulli
-RelaxedBernoulli.mean = property(lambda self: self.probs)
+from pyro.distributions import RelaxedOneHotCategorical
+RelaxedOneHotCategorical.mean = property(lambda self: self.probs)
 
 class Cell2fate_ModularTranscriptionRate_module_SingleLineage_GlobalTime_FlexibleSwitchTime(PyroModule):
     r"""
@@ -288,26 +287,6 @@ class Cell2fate_ModularTranscriptionRate_module_SingleLineage_GlobalTime_Flexibl
             "factor_states_per_gene",
             torch.tensor(self.factor_prior["states_per_gene"]),
         )
-        
-        self.register_buffer(
-            "t_c_init",
-            self.one*torch.ones((self.n_obs, 1, 1))/2.,
-        )
-        
-        self.register_buffer(
-            "t_mON_init",
-            torch.ones((1, 1, self.n_modules))/2.,
-        )  
-        
-        self.register_buffer(
-            "t_mOFF_init",
-            torch.zeros((1, 1, self.n_modules)) + 0.1,
-        )      
-        
-        self.register_buffer(
-            "probs_I_cm",
-            torch.tensor(1.-10**(-10)),
-        )
             
     ############# Define the model ################
     @staticmethod
@@ -403,29 +382,34 @@ class Cell2fate_ModularTranscriptionRate_module_SingleLineage_GlobalTime_Flexibl
         
         # =============== Activity of modules ============ #
         # (To be inferred with RelaxedBernoulliStraightThrough in the future)
-        with obs_plate:
-            I_cm = pyro.sample('I_cm', RelaxedBernoulli(probs = self.probs_I_cm, temperature = self.one/10**10
-                                                              ).expand([self.n_obs, 1, self.n_modules]))
-            
+        
+        I_cm = pyro.deterministic('I_cm', self.init_val_I_cm)
+        
         # =====================Time======================= #
         # Global time for each cell:
-        Tmax = pyro.deterministic('Tmax', self.one*1000.)
+        Tmax = pyro.sample('Tmax', dist.Gamma(G_a(self.Tmax_mean, self.Tmax_sd), G_b(self.Tmax_mean, self.Tmax_sd)))
         with obs_plate:
-            t_c = pyro.sample('t_c', dist.Gamma(G_a(self.one/2., self.one/4.),
-                                                G_b(self.one/2., self.one/4.)))
-#         t_c = pyro.param('t_c', self.t_c_init, constraint=constraints.interval(0.01, 1.))
+            t_c = pyro.sample('t_c', dist.Uniform(self.zero, self.one))
         T_c = pyro.deterministic('T_c', t_c*Tmax)
-        t_mON = pyro.param('t_mON', self.t_mON_init, constraint=constraints.positive)
-        T_mON = pyro.deterministic('T_mON', t_mON*Tmax)
+        # Variability of switch times for each module:
+#         t_mi_alpha = pyro.sample('t_mON_alpha',
+#                                  dist.Gamma(self.t_mi_alpha_alpha,
+#                                             self.t_mi_alpha_alpha/self.t_mi_alpha_mu).expand([1, 1, self.n_modules]).to_event(3))
+        t_mON = pyro.sample('t_mON', dist.Uniform(self.zero, self.one).expand([1, 1, self.n_modules]).to_event(3))
+#         with obs_plate:
+#             t_cmON = pyro.sample('t_cmON', dist.Gamma(t_mi_alpha, t_mi_alpha/t_mON).expand([batch_size, 1, self.n_modules]))
+        T_mON = pyro.deterministic('T_mON', -Tmax*self.zero_point_one + t_mON*Tmax*self.one_point_two)
         # Global switch off time for each module in each cell:
-        t_mOFF = pyro.param('t_mOFF', self.t_mOFF_init, constraint=constraints.positive)
+        t_mOFF = pyro.sample('t_mOFF', dist.Exponential(self.n_modules_torch).expand([1, 1, self.n_modules]).to_event(3))
+#         with obs_plate:
+#             t_cmOFF = pyro.sample('t_cmOFF', dist.Gamma(t_mi_alpha, t_mi_alpha/t_mOFF).expand([batch_size, 1, self.n_modules]))
         T_mOFF = pyro.deterministic('T_mOFF', T_mON + t_mOFF*Tmax)
         
         # =========== Mean expression according to RNAvelocity model ======================= #
         # (summing over all independent modules)
         mu_total = torch.stack([self.zeros[idx,...], self.zeros[idx,...]], axis = -1)
         for m in range(self.n_modules):
-            mu_total += I_cm[idx,:,m].unsqueeze(-1)*mu_mRNA_continousAlpha_globalTime_twoStates(
+            mu_total += I_cm[idx,m].unsqueeze(-1).unsqueeze(-1)*mu_mRNA_continousAlpha_globalTime_twoStates(
                 A_mgON[m,:], A_mgOFF, beta_g, gamma_g, lam_mi[m,...], T_c[:,:,0], T_mON[:,:,m], T_mOFF[:,:,m], self.zeros[idx,...])
         mu_expression = pyro.deterministic('mu_expression', mu_total)
         

@@ -353,6 +353,56 @@ def get_training_data_version2(adata, remove_clusters = None, cells_per_cluster 
     adata.obs['unspliced_fraction_retained'] = np.sum(adata.layers['unspliced_raw'], axis = 1)/total_unspliced[index]
     return adata
 
+def get_training_data_version3(adata, remove_clusters = None, cells_per_cluster = 100,
+                         cluster_column = 'clusters', min_shared_counts = 10, n_var_genes = 2000):
+    """
+    Reduces and anndata object to the most relevant cells and genes for understanding the differentiation trajectories
+    in the data.
+    
+    Parameters
+    ----------
+    adata
+        anndata
+    remove_clusters
+        names of clusters to be removed
+    cells_per_cluster
+        how many cells to keep per cluster. For Louvain clustering with resolution = 1, keeping more than 300 cells
+        per cluster does not provide much extra information.
+    cluster_column
+        name of the column in adata.obs that contains cluster names
+    min_shared_counts
+        minimum number of spliced+unspliced counts across all cells for a gene to be retained
+    n_var_genes
+        number of top variable genes to retain
+        
+    Returns
+    -------
+    adata object reduced to the most informative cells and genes
+    """
+    random.seed(a=1)
+    adata = adata[[c not in remove_clusters for c in adata.obs[cluster_column]], :]
+    # Restrict samples per cell type:
+    N = cells_per_cluster
+    unique_celltypes = np.unique(adata.obs[cluster_column])
+    index = []
+    for i in range(len(unique_celltypes)):
+        if adata.obs[cluster_column].value_counts()[unique_celltypes[i]] > N:
+            subset = np.where(adata.obs[cluster_column] == unique_celltypes[i])[0]
+            subset = random.sample(list(subset), N)
+        else:
+            subset = np.where(adata.obs[cluster_column] == unique_celltypes[i])[0]
+        index += list(subset)
+    adata = adata[index,:]
+    print('Keeping at most ' + str(N) + ' cells per cluster')
+    scv.pp.filter_genes(adata, min_shared_counts=min_shared_counts)
+    sc.pp.normalize_total(adata, target_sum=1e4)
+    scv.pp.filter_genes_dispersion(adata, n_top_genes=n_var_genes)
+    if scipy.sparse.issparse(adata.layers['spliced']):
+        adata.layers['spliced'] = np.array(adata.layers['spliced'].toarray(), dtype=np.float32)
+    if scipy.sparse.issparse(adata.layers['unspliced']):
+        adata.layers['unspliced'] = np.array(adata.layers['unspliced'].toarray(), dtype=np.float32)
+    return adata
+
 def add_prior_knowledge(adata, cluster_column, initial_stages = None, initial_stages_lineage = None,
                            intermediate_stages = None, intermediate_stages_lineage = None,
                            terminal_stages = None, terminal_stages_lineage = None):
