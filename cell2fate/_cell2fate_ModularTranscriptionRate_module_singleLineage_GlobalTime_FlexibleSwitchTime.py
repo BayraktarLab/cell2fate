@@ -428,7 +428,7 @@ class Cell2fate_ModularTranscriptionRate_module_SingleLineage_GlobalTime_Flexibl
         t_c_loc = pyro.sample('t_c_loc', dist.Gamma(self.one, self.one/0.5))
         t_c_scale = pyro.sample('t_c_scale', dist.Gamma(self.one, self.one/0.25))
         with obs_plate:
-            t_c = pyro.sample('t_c', dist.Normal(t_c_loc, t_c_scale).expand([self.n_obs, 1, 1]))
+            t_c = pyro.sample('t_c', dist.Normal(t_c_loc, t_c_scale).expand([batch_size, 1, 1]))
         T_c = pyro.deterministic('T_c', t_c*T_max)
         # Global switch on time for each gene:
 #         t_mON = pyro.sample('t_mON', dist.Uniform(self.zero, self.one).expand([1, 1, self.n_modules]).to_event(2))
