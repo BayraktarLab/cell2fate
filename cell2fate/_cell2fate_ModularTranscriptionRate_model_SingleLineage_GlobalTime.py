@@ -27,7 +27,6 @@ from numpy import inner
 import scvelo as scv
 import scipy
 import gseapy as gp
-
 from cell2fate._pyro_base_cell2fate_module import Cell2FateBaseModule
 from cell2fate._pyro_mixin import PltExportMixin, QuantileMixin
 from ._cell2fate_ModularTranscriptionRate_module_singleLineage_GlobalTime_FlexibleSwitchTime import \

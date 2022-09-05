@@ -38,10 +38,10 @@ class Cell2fate_ModularTranscriptionRate_module_SingleLineage_GlobalTime_Flexibl
         stochastic_v_ag_hyp_prior={"alpha": 9.0, "beta": 3.0},
         factor_prior={"rate": 1.0, "alpha": 1.0, "states_per_gene": 3.0},
         t_switch_alpha_prior = {"mean": 1000., "alpha": 1000.},
-        splicing_rate_hyp_prior={"mean_hyp_prior_mean": 1.0, "mean_hyp_prior_sd": 0.25,
-                                 "sd_hyp_prior_mean": 0.33, "sd_hyp_prior_sd": 0.1},
-        degredation_rate_hyp_prior={"mean_hyp_prior_mean": 1.0, "mean_hyp_prior_sd": 0.25,
-                                    "sd_hyp_prior_mean": 0.33, "sd_hyp_prior_sd": 0.1},
+        splicing_rate_hyp_prior={"mean": 1.0, "alpha": 5.0,
+                                "mean_hyp_alpha": 10., "alpha_hyp_alpha": 20.},
+        degredation_rate_hyp_prior={"mean": 1.0, "alpha": 5.0,
+                                "mean_hyp_alpha": 10., "alpha_hyp_alpha": 20.},
         activation_rate_hyp_prior={"mean_hyp_prior_mean": 2., "mean_hyp_prior_sd": 0.33,
                                     "sd_hyp_prior_mean": 0.33, "sd_hyp_prior_sd": 0.1},
         s_overdispersion_factor_hyp_prior={'alpha_mean': 100., 'beta_mean': 1.,
@@ -51,7 +51,7 @@ class Cell2fate_ModularTranscriptionRate_module_SingleLineage_GlobalTime_Flexibl
         detection_gi_prior={"mean": 1, "alpha": 200},
         gene_add_alpha_hyp_prior={"alpha": 9.0, "beta": 3.0},
         gene_add_mean_hyp_prior={"alpha": 1.0, "beta": 100.0},
-        Tmax_prior={"mean": 300., "sd": 100.},
+        Tmax_prior={"mean": 50., "sd": 50.},
         switch_time_sd = 0.1,
         init_vals: Optional[dict] = None
     ):
@@ -234,43 +234,43 @@ class Cell2fate_ModularTranscriptionRate_module_SingleLineage_GlobalTime_Flexibl
         self.register_buffer(
             "activation_rate_sd_hyp_prior_sd",
             torch.tensor(activation_rate_hyp_prior["sd_hyp_prior_sd"]),
-        )
+        )     
         
         # Register parameters for splicing rate hyperprior:
         self.register_buffer(
+            "splicing_rate_alpha_hyp_prior_mean",
+            torch.tensor(self.splicing_rate_hyp_prior["alpha"]),
+        )
+        self.register_buffer(
             "splicing_rate_mean_hyp_prior_mean",
-            torch.tensor(self.splicing_rate_hyp_prior["mean_hyp_prior_mean"]),
-        )        
-        self.register_buffer(
-            "splicing_rate_mean_hyp_prior_sd",
-            torch.tensor(self.splicing_rate_hyp_prior["mean_hyp_prior_sd"]),
+            torch.tensor(self.splicing_rate_hyp_prior["mean"]),
         )
         self.register_buffer(
-            "splicing_rate_sd_hyp_prior_mean",
-            torch.tensor(self.splicing_rate_hyp_prior["sd_hyp_prior_mean"]),
+            "splicing_rate_alpha_hyp_prior_alpha",
+            torch.tensor(self.splicing_rate_hyp_prior["alpha_hyp_alpha"]),
         )
         self.register_buffer(
-            "splicing_rate_sd_hyp_prior_sd",
-            torch.tensor(self.splicing_rate_hyp_prior["sd_hyp_prior_sd"]),
+            "splicing_rate_mean_hyp_prior_alpha",
+            torch.tensor(self.splicing_rate_hyp_prior["mean_hyp_alpha"]),
         )
         
         # Register parameters for degredation rate hyperprior:
         self.register_buffer(
+            "degredation_rate_alpha_hyp_prior_mean",
+            torch.tensor(self.degredation_rate_hyp_prior["alpha"]),
+        )
+        self.register_buffer(
             "degredation_rate_mean_hyp_prior_mean",
-            torch.tensor(self.degredation_rate_hyp_prior["mean_hyp_prior_mean"]),
-        )        
-        self.register_buffer(
-            "degredation_rate_mean_hyp_prior_sd",
-            torch.tensor(self.degredation_rate_hyp_prior["mean_hyp_prior_sd"]),
+            torch.tensor(self.degredation_rate_hyp_prior["mean"]),
         )
         self.register_buffer(
-            "degredation_rate_sd_hyp_prior_mean",
-            torch.tensor(self.degredation_rate_hyp_prior["sd_hyp_prior_mean"]),
+            "degredation_rate_alpha_hyp_prior_alpha",
+            torch.tensor(self.degredation_rate_hyp_prior["alpha_hyp_alpha"]),
         )
         self.register_buffer(
-            "degredation_rate_sd_hyp_prior_sd",
-            torch.tensor(self.degredation_rate_hyp_prior["sd_hyp_prior_sd"]),
-        )
+            "degredation_rate_mean_hyp_prior_alpha",
+            torch.tensor(self.degredation_rate_hyp_prior["mean_hyp_alpha"]),
+        ) 
         
         # per gene rate priors
         self.register_buffer(
@@ -358,21 +358,21 @@ class Cell2fate_ModularTranscriptionRate_module_SingleLineage_GlobalTime_Flexibl
         
         # ===================== Kinetic Rates ======================= #
         # Splicing rate:
-        beta_mu = pyro.sample('beta_mu',
-                   dist.Gamma(G_a(self.splicing_rate_mean_hyp_prior_mean, self.splicing_rate_mean_hyp_prior_sd),
-                              G_b(self.splicing_rate_mean_hyp_prior_mean, self.splicing_rate_mean_hyp_prior_sd)))
-        beta_sd = pyro.sample('beta_sd',
-                   dist.Gamma(G_a(self.splicing_rate_sd_hyp_prior_mean, self.splicing_rate_sd_hyp_prior_sd),
-                              G_b(self.splicing_rate_sd_hyp_prior_mean, self.splicing_rate_sd_hyp_prior_sd)))
-        beta_g = pyro.sample('beta_g', dist.Gamma(G_a(beta_mu, beta_sd), G_b(beta_mu, beta_sd)).expand([1,self.n_vars]).to_event(2))
+        splicing_alpha = pyro.sample('splicing_alpha',
+                              dist.Gamma(self.splicing_rate_alpha_hyp_prior_alpha,
+                              self.splicing_rate_alpha_hyp_prior_alpha/self.splicing_rate_alpha_hyp_prior_mean))
+        splicing_mean = pyro.sample('splicing_mean',
+                              dist.Gamma(self.splicing_rate_mean_hyp_prior_alpha,
+                              self.splicing_rate_mean_hyp_prior_alpha/self.splicing_rate_mean_hyp_prior_mean))
+        beta_g = pyro.sample('beta_g', dist.Gamma(splicing_alpha, splicing_alpha/splicing_mean).expand([1,self.n_vars]).to_event(2))
         # Degredation rate:
-        gamma_mu = pyro.sample('gamma_mu',
-                   dist.Gamma(G_a(self.degredation_rate_mean_hyp_prior_mean, self.degredation_rate_mean_hyp_prior_sd),
-                              G_b(self.degredation_rate_mean_hyp_prior_mean, self.degredation_rate_mean_hyp_prior_sd)))
-        gamma_sd = pyro.sample('gamma_sd',
-                   dist.Gamma(G_a(self.degredation_rate_sd_hyp_prior_mean, self.degredation_rate_sd_hyp_prior_sd),
-                              G_b(self.degredation_rate_sd_hyp_prior_mean, self.degredation_rate_sd_hyp_prior_sd)))
-        gamma_g = pyro.sample('gamma_g', dist.Gamma(G_a(gamma_mu, gamma_sd), G_b(gamma_mu, gamma_sd)).expand([1, self.n_vars]).to_event(2))
+        degredation_alpha = pyro.sample('degredation_alpha',
+                              dist.Gamma(self.degredation_rate_alpha_hyp_prior_alpha,
+                              self.degredation_rate_alpha_hyp_prior_alpha/self.degredation_rate_alpha_hyp_prior_mean))
+        degredation_mean = pyro.sample('degredation_mean',
+                              dist.Gamma(self.degredation_rate_mean_hyp_prior_alpha,
+                              self.degredation_rate_mean_hyp_prior_alpha/self.degredation_rate_mean_hyp_prior_mean))
+        gamma_g = pyro.sample('gamma_g', dist.Gamma(degredation_alpha, degredation_alpha/degredation_mean).expand([1,self.n_vars]).to_event(2))
         # Transcription rate contribution of each module:
         factor_level_g = pyro.sample(
             "factor_level_g",
@@ -407,20 +407,38 @@ class Cell2fate_ModularTranscriptionRate_module_SingleLineage_GlobalTime_Flexibl
 #             I_cm = pyro.sample('I_cm', RelaxedBernoulli(probs = self.probs_I_cm, temperature = self.one/10**10
 #                                                               ).expand([self.n_obs, 1, self.n_modules]))
             
+#         # =====================Time======================= #
+        # Global time for each cell:
+#         Tmax = pyro.sample('Tmax', dist.Gamma(self.one, self.one/50.))
+#         t_c_mean = pyro.sample('t_c_mean', dist.Gamma(self.one, self.one/0.5))
+#         t_c_alpha = pyro.sample('t_c_alpha', dist.Gamma(self.one, self.one))
+#         with obs_plate:
+#             t_c = pyro.sample('t_c', dist.Gamma(t_c_alpha, t_c_alpha/t_c_mean))
+# #         t_c = pyro.param('t_c', self.t_c_init, constraint=constraints.interval(0.01, 1.))
+#         T_c = pyro.deterministic('T_c', t_c*Tmax)
+#         t_mON = pyro.param('t_mON', self.t_mON_init, constraint=constraints.positive)
+#         T_mON = pyro.deterministic('T_mON', t_mON*Tmax)
+#         # Global switch off time for each module in each cell:
+#         t_mOFF = pyro.param('t_mOFF', self.t_mOFF_init, constraint=constraints.positive)
+#         T_mOFF = pyro.deterministic('T_mOFF', T_mON + t_mOFF*Tmax)
+        
         # =====================Time======================= #
         # Global time for each cell:
-        Tmax = pyro.sample('Tmax', dist.Gamma(self.one * 1000., self.one*1000./500.))
-        t_c_mean = pyro.sample('t_c_mean', dist.Gamma(self.one, self.one/0.5))
-        t_c_alpha = pyro.sample('t_c_alpha', dist.Gamma(self.one, self.one))
+        T_max = pyro.sample('Tmax', dist.Gamma(G_a(self.Tmax_mean, self.Tmax_sd), G_b(self.Tmax_mean, self.Tmax_sd)))
+        t_c_loc = pyro.sample('t_c_loc', dist.Gamma(self.one, self.one/0.5))
+        t_c_scale = pyro.sample('t_c_scale', dist.Gamma(self.one, self.one/0.25))
         with obs_plate:
-            t_c = pyro.sample('t_c', dist.Gamma(t_c_alpha, t_c_alpha/t_c_mean))
-#         t_c = pyro.param('t_c', self.t_c_init, constraint=constraints.interval(0.01, 1.))
-        T_c = pyro.deterministic('T_c', t_c*Tmax)
-        t_mON = pyro.param('t_mON', self.t_mON_init, constraint=constraints.positive)
-        T_mON = pyro.deterministic('T_mON', t_mON*Tmax)
-        # Global switch off time for each module in each cell:
-        t_mOFF = pyro.param('t_mOFF', self.t_mOFF_init, constraint=constraints.positive)
-        T_mOFF = pyro.deterministic('T_mOFF', T_mON + t_mOFF*Tmax)
+            t_c = pyro.sample('t_c', dist.Normal(t_c_loc, t_c_scale).expand([self.n_obs, 1, 1]))
+        T_c = pyro.deterministic('T_c', t_c*T_max)
+        # Global switch on time for each gene:
+#         t_mON = pyro.sample('t_mON', dist.Uniform(self.zero, self.one).expand([1, 1, self.n_modules]).to_event(2))
+        t_delta = pyro.sample('t_delta', dist.Gamma(self.one*20, self.one * 20 *self.n_modules_torch).
+                              expand([self.n_modules]).to_event(1))
+        t_mON = torch.cumsum(torch.concat([self.zero.unsqueeze(0), t_delta[:-1]]), dim = 0).unsqueeze(0).unsqueeze(0)
+        T_mON = pyro.deterministic('T_mON', T_max*t_mON)
+        # Global switch off time for each gene:
+        t_mOFF = pyro.sample('t_mOFF', dist.Exponential(self.n_modules_torch).expand([1, 1, self.n_modules]).to_event(2))
+        T_mOFF = pyro.deterministic('T_mOFF', T_mON + T_max*t_mOFF)
         
         # =========== Mean expression according to RNAvelocity model ======================= #
         # (summing over all independent modules) I_cm[idx,:,m].unsqueeze(-1)*
