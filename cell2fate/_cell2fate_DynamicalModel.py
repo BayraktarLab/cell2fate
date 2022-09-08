@@ -36,7 +36,7 @@ from cell2fate.utils import multiplot_from_generator
 from cell2fate.utils import mu_mRNA_continousAlpha_globalTime_twoStates
 import cell2fate as c2f
 
-class Cell2fate_ModularTranscriptionRate_model_SingleLineage_GlobalTime(QuantileMixin, PyroSampleMixin, PyroSviTrainMixin, PltExportMixin, BaseModelClass):
+class Cell2fate_DynamicalModel(QuantileMixin, PyroSampleMixin, PyroSviTrainMixin, PltExportMixin, BaseModelClass):
     """
     Cell2fate model. User-end model class. See Module class for description of the model.
 
@@ -75,7 +75,7 @@ class Cell2fate_ModularTranscriptionRate_model_SingleLineage_GlobalTime(Quantile
             n_batch=self.summary_stats["n_batch"],
             **model_kwargs,
         )
-        self._model_summary_string = f'Differentiation model with the following params: \nn_batch: {self.summary_stats["n_batch"]} '
+        self._model_summary_string = f'Cell2fate Dynamical Model with the following params: \nn_batch: {self.summary_stats["n_batch"]} '
         self.init_params_ = self._get_init_params(locals())
 
     @classmethod

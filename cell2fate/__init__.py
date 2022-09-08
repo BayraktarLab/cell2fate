@@ -17,6 +17,8 @@ from cell2fate.initialize_DynamicalModel import initialize_DynamicalModel
 from ._cell2fate_ModularTranscriptionRate_model_SingleLineage_GlobalTime import Cell2fate_ModularTranscriptionRate_model_SingleLineage_GlobalTime
 from ._cell2fate_ModularTranscriptionRate_MixtureModel import \
 Cell2fate_ModularTranscriptionRate_MixtureModel
+from ._cell2fate_DynamicalModel import \
+Cell2fate_DynamicalModel
 
 # https://github.com/python-poetry/poetry/pull/2366#issuecomment-652418094
 # https://github.com/python-poetry/poetry/issues/144#issuecomment-623927302
