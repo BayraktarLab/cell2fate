@@ -29,14 +29,14 @@ import scipy
 import gseapy as gp
 from cell2fate._pyro_base_cell2fate_module import Cell2FateBaseModule
 from cell2fate._pyro_mixin import PltExportMixin, QuantileMixin
-from ._cell2fate_ModularTranscriptionRate_module_singleLineage_GlobalTime_FlexibleSwitchTime import \
+from ._cell2fate_ModularTranscriptionRate_module_multiLineage_GlobalTime_FlexibleSwitchTime import \
 Cell2fate_ModularTranscriptionRate_module_SingleLineage_GlobalTime_FlexibleSwitchTime
 from cell2fate.utils import multiplot_from_generator
 
 from cell2fate.utils import mu_mRNA_continousAlpha_globalTime_twoStates
 import cell2fate as c2f
 
-class Cell2fate_DynamicalModel(QuantileMixin, PyroSampleMixin, PyroSviTrainMixin, PltExportMixin, BaseModelClass):
+class Cell2fate_DynamicalModel_MultiLineage(QuantileMixin, PyroSampleMixin, PyroSviTrainMixin, PltExportMixin, BaseModelClass):
     """
     Cell2fate model. User-end model class. See Module class for description of the model.
 
@@ -123,10 +123,10 @@ class Cell2fate_DynamicalModel(QuantileMixin, PyroSampleMixin, PyroSviTrainMixin
 
     def train(
         self,
-        max_epochs: int = 500,
-        batch_size: int = 1000,
+        max_epochs: Optional[int] = None,
+        batch_size: int = 2500,
         train_size: float = 1,
-        lr: float = 0.01,
+        lr: float = 0.002,
         **kwargs,
     ):
         """Train the model with useful defaults
@@ -193,7 +193,7 @@ class Cell2fate_DynamicalModel(QuantileMixin, PyroSampleMixin, PyroSviTrainMixin
                           torch.tensor(self.adata_manager.get_from_registry('spliced'))], axis = -1), axis = -1), axis = -1)
         inferred_total = torch.sum(torch.sum(torch.tensor(self.samples['post_sample_means']['mu_expression']), axis = -1), axis = -1)
         for m in range(self.module.model.n_modules):
-            mu_m = mu_mRNA_continousAlpha_globalTime_twoStates(
+            mu_m = torch.tensor(self.samples['post_sample_means']['I_cm'][...,m]).unsqueeze(-1)*mu_mRNA_continousAlpha_globalTime_twoStates(
                 torch.tensor(self.samples['post_sample_means']['A_mgON'][m,:]),
                 torch.tensor(0.),
                 torch.tensor(self.samples['post_sample_means']['beta_g']),
@@ -218,6 +218,8 @@ class Cell2fate_DynamicalModel(QuantileMixin, PyroSampleMixin, PyroSviTrainMixin
             adata.obs['Module ' + str(m) + ' State'
              ][adata.obs['Module ' + str(m) + ' Activation'] > 0.95
               ] = 'ON'
+            adata.obs['Module ' + str(m) + ' State'
+             ][self.samples['post_sample_means']['I_cm'][:,0,m] < 0.5] = 'OFF' 
         return adata
 
     def plot_module_summary_statistics(self, adata, save = None):
@@ -238,8 +240,7 @@ class Cell2fate_DynamicalModel(QuantileMixin, PyroSampleMixin, PyroSviTrainMixin
     def export_posterior(
         self,
         adata,
-        sample_kwargs = {"num_samples": 30, "batch_size" : None,
-                         "use_gpu" : True, 'return_samples': True},
+        sample_kwargs = None,
         export_slot: str = "mod",
         full_velocity_posterior = False,
         normalize = True):
@@ -275,11 +276,8 @@ class Cell2fate_DynamicalModel(QuantileMixin, PyroSampleMixin, PyroSviTrainMixin
         -------
         adata with posterior added in adata.obs, adata.var and adata.uns
         """
-        
-#         if sample_kwargs['batch_size'] == None:
-        sample_kwargs['batch_size'] = adata.n_obs
-        print("sample_kwargs['batch_size']", sample_kwargs['batch_size'])
-#         sample_kwargs = sample_kwargs if isinstance(sample_kwargs, dict) else dict()
+
+        sample_kwargs = sample_kwargs if isinstance(sample_kwargs, dict) else dict()
 
         # generate samples from posterior distributions for all parameters
         # and compute mean, 5%/95% quantiles and standard deviation
@@ -295,16 +293,10 @@ class Cell2fate_DynamicalModel(QuantileMixin, PyroSampleMixin, PyroSviTrainMixin
 
         adata.obs['Time (hours)'] = self.samples['post_sample_means']['T_c'].flatten() - np.min(self.samples['post_sample_means']['T_c'].flatten())
         adata.obs['Time Uncertainty (sd)'] = self.samples['post_sample_stds']['T_c'].flatten()
-        
-        adata.layers['spliced mean'] = self.samples['post_sample_means']['mu_expression'][...,1]
-        adata.layers['velocity'] = torch.tensor(self.samples['post_sample_means']['beta_g']) * \
-        self.samples['post_sample_means']['mu_expression'][...,0] - \
-        torch.tensor(self.samples['post_sample_means']['gamma_g']) * \
-        self.samples['post_sample_means']['mu_expression'][...,1]
 
         return adata
 
-    def compute_velocity_graph_Bergen2020(mod, adata, n_neighbours = 50, full_posterior = True, spliced_key = 'Ms',
+    def compute_velocity_graph_Bergen2020(mod, adata, n_neighbours = None, full_posterior = True, spliced_key = 'Ms',
                                           velocity_key = 'velocity'):
         """
         Computes a "velocity graph" similar to the method in:
@@ -409,7 +401,7 @@ class Cell2fate_DynamicalModel(QuantileMixin, PyroSampleMixin, PyroSviTrainMixin
             plt.savefig(save)
 
 
-    def compute_and_plot_total_velocity(self, adata, delete = True, plot = True, save = None,
+    def compute_and_plot_total_velocity(self, adata, delete = True, plot = True, save = None, full_posterior = False,
                                      plotting_kwargs = {"color": 'clusters', 'legend_fontsize': 10, 'legend_loc': 'right_margin'}):
         """
         Computes total RNA velocity, as well as associated "velocity graph" and 
@@ -425,7 +417,7 @@ class Cell2fate_DynamicalModel(QuantileMixin, PyroSampleMixin, PyroSviTrainMixin
             torch.tensor(self.samples['post_sample_means']['gamma_g']) * \
             self.samples['post_sample_means']['mu_expression'][...,1]
             adata.uns['Velocity' + '_graph'] = self.compute_velocity_graph_Bergen2020(
-                                                   adata, n_neighbours = None, full_posterior = False,
+                                                   adata, n_neighbours = None, full_posterior = full_posterior,
                                                    velocity_key = 'Velocity',
                                                    spliced_key = 'Spliced Mean')
             if plot:

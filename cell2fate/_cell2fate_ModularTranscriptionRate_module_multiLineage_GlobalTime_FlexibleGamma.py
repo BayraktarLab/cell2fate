@@ -16,6 +16,51 @@ from torch.distributions import constraints
 from pyro.distributions import RelaxedBernoulli
 RelaxedBernoulli.mean = property(lambda self: self.probs)
 
+def mu_alpha(alpha_new, alpha_old, tau, lam):
+    '''Calculates transcription rate as a function of new target transcription rate,
+    old transcription rate at changepoint, time since change point and rate of exponential change process'''
+    return (alpha_new - alpha_old) * (1 - torch.exp(-lam*tau)) + alpha_old
+
+def mu_mRNA_continuousAlpha_withPlates(alpha, beta, gamma, tau, u0, s0, delta_alpha, lam):
+    ''' Calculates expected value of spliced and unspliced counts as a function of rates, latent time, initial states,
+    difference to transcription rate in previous state and rate of exponential change process between states.'''
+    
+    mu_u = u0*torch.exp(-beta*tau) + (alpha/beta)* (1 - torch.exp(-beta*tau)) + delta_alpha/(beta-lam+10**(-5))*(torch.exp(-beta*tau) - torch.exp(-lam*tau))
+    mu_s = (s0*torch.exp(-gamma*tau) + 
+    alpha/gamma * (1 - torch.exp(-gamma*tau)) +
+    (alpha - beta * u0)/(gamma - beta+10**(-5)) * (torch.exp(-gamma*tau) - torch.exp(-beta*tau)) +
+    (delta_alpha*beta)/((beta - lam+10**(-5))*(gamma - beta+10**(-5))) * (torch.exp(-beta*tau) - torch.exp(-gamma*tau))-
+    (delta_alpha*beta)/((beta - lam+10**(-5))*(gamma - lam+10**(-5))) * (torch.exp(-lam*tau) - torch.exp(-gamma*tau)))
+
+    return torch.stack([mu_u, mu_s], axis = -1)
+
+def mu_mRNA_continousAlphaAndGamma_globalTime_twoStates(alpha_ON, alpha_OFF, beta, gamma, gamma_mi, lam_gi, T_c, T_gON, T_gOFF, Zeros):
+    '''Calculates expected value of spliced and unspliced counts as a function of rates,
+    global latent time, initial states and global switch times between two states'''
+    n_cells = T_c.shape[-2]
+    n_genes = alpha_ON.shape[-1]
+    tau = torch.clip(T_c - T_gON, min = 10**(-5))
+    t0 = T_gOFF - T_gON
+    # Transcription rate in each cell for each gene:
+    boolean = (tau < t0).reshape(n_cells, 1)
+    alpha_cg = alpha_ON*boolean + alpha_OFF*~boolean
+    # Time since changepoint for each cell and gene:
+    tau_cg = tau*boolean + (tau - t0)*~boolean
+    # Initial condition for each cell and gene:
+    lam_g = ~boolean*lam_gi[:,1] + boolean*lam_gi[:,0]
+    gamma_scaling = ~boolean*gamma_mi[1] + boolean*gamma_mi[0]
+    initial_state = mu_mRNA_continuousAlpha_withPlates(alpha_ON, beta, gamma*gamma_mi[0], t0,
+                                                       Zeros, Zeros, alpha_ON-alpha_OFF, lam_gi[:,0])
+    initial_alpha = mu_alpha(alpha_ON, alpha_OFF, t0, lam_gi[:,0])
+    u0_g = 10**(-5) + ~boolean*initial_state[:,:,0]
+    s0_g = 10**(-5) + ~boolean*initial_state[:,:,1]
+    delta_alpha = ~boolean*initial_alpha*(-1) + boolean*alpha_ON*(1)
+    alpha_0 = alpha_OFF + ~boolean*initial_alpha
+    # Unspliced and spliced count variance for each gene in each cell:
+    mu_RNAvelocity = torch.clip(mu_mRNA_continuousAlpha_withPlates(alpha_cg, beta, gamma*gamma_scaling, tau_cg,
+                                                         u0_g, s0_g, delta_alpha, lam_g), min = 10**(-5))
+    return mu_RNAvelocity
+
 class Cell2fate_ModularTranscriptionRate_module_SingleLineage_GlobalTime_FlexibleSwitchTime(PyroModule):
     r"""
     - Models spliced and unspliced counts for each gene as a dynamical process in which transcriptional modules switch on
@@ -35,7 +80,7 @@ class Cell2fate_ModularTranscriptionRate_module_SingleLineage_GlobalTime_Flexibl
         n_batch,
         n_extra_categoricals=None,
         n_modules = 10,
-        stochastic_v_ag_hyp_prior={"alpha": 6.0, "beta": 3.0},
+        stochastic_v_ag_hyp_prior={"alpha": 3.0, "beta": 3.0},
         factor_prior={"rate": 1.0, "alpha": 1.0, "states_per_gene": 3.0},
         t_switch_alpha_prior = {"mean": 1000., "alpha": 1000.},
         splicing_rate_hyp_prior={"mean": 1.0, "alpha": 5.0,
@@ -49,6 +94,7 @@ class Cell2fate_ModularTranscriptionRate_module_SingleLineage_GlobalTime_Flexibl
         detection_hyp_prior={"alpha": 10.0, "mean_alpha": 1.0, "mean_beta": 1.0},
         detection_i_prior={"mean": 1, "alpha": 100},
         detection_gi_prior={"mean": 1, "alpha": 200},
+        gamma_mi_prior_alpha = 1000.,
         gene_add_alpha_hyp_prior={"alpha": 9.0, "beta": 3.0},
         gene_add_mean_hyp_prior={"alpha": 1.0, "beta": 100.0},
         Tmax_prior={"mean": 50., "sd": 50.},
@@ -203,6 +249,11 @@ class Cell2fate_ModularTranscriptionRate_module_SingleLineage_GlobalTime_Flexibl
             torch.tensor(self.detection_hyp_prior["alpha"]),
         )
         
+        self.register_buffer(
+            "gamma_mi_prior_alpha",
+            torch.tensor(gamma_mi_prior_alpha),
+        )
+        
         self.register_buffer("ones_n_batch_1", torch.ones((self.n_batch, 1)))
         
         self.register_buffer("ones", torch.ones((1, 1)))
@@ -306,7 +357,7 @@ class Cell2fate_ModularTranscriptionRate_module_SingleLineage_GlobalTime_Flexibl
         
         self.register_buffer(
             "probs_I_cm",
-            torch.tensor(1.-10**(-10)),
+            torch.tensor(0.95),
         )
             
     ############# Define the model ################
@@ -400,27 +451,21 @@ class Cell2fate_ModularTranscriptionRate_module_SingleLineage_GlobalTime_Flexibl
                                             G_b(lam_mu, lam_sd)).expand([self.n_modules, 1, 1]).to_event(3))
         lam_mi = pyro.sample('lam_mi', dist.Gamma(G_a(lam_m_mu, lam_m_mu*0.05),
                                             G_b(lam_m_mu, lam_m_mu*0.05)).expand([self.n_modules, 1, 2]).to_event(3))
+        # Module and state specific scaling of degredation rate:
+        gamma_mi = pyro.sample(
+            "gamma_mi",
+            dist.Gamma(
+                self.ones * self.gamma_mi_prior_alpha,
+                self.ones * self.gamma_mi_prior_alpha,
+            )
+            .expand([self.n_modules, 2]).to_event(2)
+        )
         
-#         # =============== Activity of modules ============ #
-#         # (To be inferred with RelaxedBernoulliStraightThrough in the future)
-#         with obs_plate:
-#             I_cm = pyro.sample('I_cm', RelaxedBernoulli(probs = self.probs_I_cm, temperature = self.one/10**10
-#                                                               ).expand([self.n_obs, 1, self.n_modules]))
-            
-#         # =====================Time======================= #
-        # Global time for each cell:
-#         Tmax = pyro.sample('Tmax', dist.Gamma(self.one, self.one/50.))
-#         t_c_mean = pyro.sample('t_c_mean', dist.Gamma(self.one, self.one/0.5))
-#         t_c_alpha = pyro.sample('t_c_alpha', dist.Gamma(self.one, self.one))
-#         with obs_plate:
-#             t_c = pyro.sample('t_c', dist.Gamma(t_c_alpha, t_c_alpha/t_c_mean))
-# #         t_c = pyro.param('t_c', self.t_c_init, constraint=constraints.interval(0.01, 1.))
-#         T_c = pyro.deterministic('T_c', t_c*Tmax)
-#         t_mON = pyro.param('t_mON', self.t_mON_init, constraint=constraints.positive)
-#         T_mON = pyro.deterministic('T_mON', t_mON*Tmax)
-#         # Global switch off time for each module in each cell:
-#         t_mOFF = pyro.param('t_mOFF', self.t_mOFF_init, constraint=constraints.positive)
-#         T_mOFF = pyro.deterministic('T_mOFF', T_mON + t_mOFF*Tmax)
+        # =============== Activity of modules ============ #
+        # (To be inferred with RelaxedBernoulliStraightThrough in the future)
+        with obs_plate:
+            I_cm = pyro.sample('I_cm', RelaxedBernoulli(probs = self.probs_I_cm, temperature = self.one/1000.
+                                                              ).expand([batch_size, 1, self.n_modules]))
         
         # =====================Time======================= #
         # Global time for each cell:
@@ -444,8 +489,8 @@ class Cell2fate_ModularTranscriptionRate_module_SingleLineage_GlobalTime_Flexibl
         # (summing over all independent modules) I_cm[idx,:,m].unsqueeze(-1)*
         mu_total = torch.stack([self.zeros[idx,...], self.zeros[idx,...]], axis = -1)
         for m in range(self.n_modules):
-            mu_total += mu_mRNA_continousAlpha_globalTime_twoStates(
-                A_mgON[m,:], A_mgOFF, beta_g, gamma_g, lam_mi[m,...], T_c[:,:,0], T_mON[:,:,m], T_mOFF[:,:,m], self.zeros[idx,...])
+            mu_total += I_cm[...,m].unsqueeze(-1)*mu_mRNA_continousAlphaAndGamma_globalTime_twoStates(
+                A_mgON[m,:], A_mgOFF, beta_g, gamma_g, gamma_mi[m,:], lam_mi[m,...], T_c[:,:,0], T_mON[:,:,m], T_mOFF[:,:,m], self.zeros[idx,...])
         mu_expression = pyro.deterministic('mu_expression', mu_total)
         
         # =============Detection efficiency of spliced and unspliced counts =============== #
