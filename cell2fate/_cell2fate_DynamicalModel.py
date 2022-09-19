@@ -218,6 +218,9 @@ class Cell2fate_DynamicalModel(QuantileMixin, PyroSampleMixin, PyroSviTrainMixin
             adata.obs['Module ' + str(m) + ' State'
              ][adata.obs['Module ' + str(m) + ' Activation'] > 0.95
               ] = 'ON'
+            adata.obs['Module ' + str(m) + ' State'
+             ][adata.obs['Module ' + str(m) + ' Activation'] < 0.05
+              ] = 'OFF'
         return adata
 
     def plot_module_summary_statistics(self, adata, save = None):
@@ -296,15 +299,15 @@ class Cell2fate_DynamicalModel(QuantileMixin, PyroSampleMixin, PyroSviTrainMixin
         adata.obs['Time (hours)'] = self.samples['post_sample_means']['T_c'].flatten() - np.min(self.samples['post_sample_means']['T_c'].flatten())
         adata.obs['Time Uncertainty (sd)'] = self.samples['post_sample_stds']['T_c'].flatten()
         
-        adata.layers['spliced mean'] = self.samples['post_sample_means']['mu_expression'][...,1]
-        adata.layers['velocity'] = torch.tensor(self.samples['post_sample_means']['beta_g']) * \
-        self.samples['post_sample_means']['mu_expression'][...,0] - \
-        torch.tensor(self.samples['post_sample_means']['gamma_g']) * \
-        self.samples['post_sample_means']['mu_expression'][...,1]
+#         adata.layers['spliced mean'] = self.samples['post_sample_means']['mu_expression'][...,1]
+#         adata.layers['velocity'] = torch.tensor(self.samples['post_sample_means']['beta_g']) * \
+#         self.samples['post_sample_means']['mu_expression'][...,0] - \
+#         torch.tensor(self.samples['post_sample_means']['gamma_g']) * \
+#         self.samples['post_sample_means']['mu_expression'][...,1]
 
         return adata
 
-    def compute_velocity_graph_Bergen2020(mod, adata, n_neighbours = 50, full_posterior = True, spliced_key = 'Ms',
+    def compute_velocity_graph_Bergen2020(mod, adata, n_neighbours = None, full_posterior = True, spliced_key = 'Ms',
                                           velocity_key = 'velocity'):
         """
         Computes a "velocity graph" similar to the method in:
@@ -595,3 +598,22 @@ class Cell2fate_DynamicalModel(QuantileMixin, PyroSampleMixin, PyroSviTrainMixin
             tab.iloc[m,3] = ', '.join(list(enr.results.loc[enr.results['Adjusted P-value'] < p_adj_cutoff,:]['Term']))
         ### Save topGenes, topTFs and topGOterms in dataframe.
         return tab
+    
+    def plot_top_features(self, adata, tab, chosen_modules, mode = 'all genes',
+                      n_top_features = 3, save = False, process = True):
+        if process:
+            print('Log-transforming and scaling adata.X, set process = False if this is not desired.')
+            sc.pp.log1p(adata)
+            sc.pp.scale(adata, max_value=10)
+        fig, ax, = plt.subplots(len(chosen_modules), n_top_features, figsize = (5*n_top_features, 4*len(chosen_modules)))
+        for i in range(len(chosen_modules)):
+            m = chosen_modules[i]
+            if mode == 'all genes':
+                for_plotting = tab['Genes Ranked'].iloc[m].replace(" ", "").split(',')[:n_top_features]
+            elif mode == 'TFs':
+                for_plotting = tab['TFs Ranked'].iloc[m].replace(" ", "").split(',')[:n_top_features]
+            for j in range(n_top_features):
+                sc.pl.umap(adata, color = for_plotting[j], legend_loc = 'right margin',
+                            size = 200, ncols = n_top_features, show = False, ax = ax[i,j])
+        if save:
+            plt.savefig(save)
