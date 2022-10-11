@@ -602,7 +602,9 @@ class Cell2fate_DynamicalModel(QuantileMixin, PyroSampleMixin, PyroSviTrainMixin
     def plot_top_features(self, adata, tab, chosen_modules, mode = 'all genes',
                       n_top_features = 3, save = False, process = True):
         if process:
-            print('Log-transforming and scaling adata.X, set process = False if this is not desired.')
+            print('Reprocessing adata.X, set process = False if this is not desired.')
+            adata.X = adata.layers['unspliced'] + adata.layers['spliced']
+            sc.pp.normalize_total(adata, target_sum=1e4)
             sc.pp.log1p(adata)
             sc.pp.scale(adata, max_value=10)
         fig, ax, = plt.subplots(len(chosen_modules), n_top_features, figsize = (5*n_top_features, 4*len(chosen_modules)))
