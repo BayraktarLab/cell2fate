@@ -17,6 +17,23 @@ from contextlib import contextmanager
 import seaborn as sns
 import os,sys
 
+def get_max_modules(adata):
+    print('Leiden clustering ...')
+    adata_copy = adata.copy()
+    adata_copy.X = adata_copy.layers['unspliced'] + adata_copy.layers['spliced']
+    sc.pp.normalize_total(adata_copy, target_sum=1e4)
+    sc.pp.log1p(adata_copy)
+    sc.pp.highly_variable_genes(adata_copy, min_mean=0.0125, max_mean=3, min_disp=0.5)
+    adata_copy = adata_copy[:, adata_copy.var.highly_variable]
+    sc.pp.scale(adata_copy, max_value=10)
+    sc.pp.neighbors(adata_copy)
+    adata_copy = sc.tl.leiden(adata_copy, resolution = 0.75, copy = True)
+    print('Number of Leiden Clusters: ' + str(len(np.unique(adata_copy.obs['leiden']))))
+    print('Maximal Number of Modules: ' + str(int(1.15*np.round(len(np.unique(adata_copy.obs['leiden']))))))
+    n_modules = int(np.round(1.15*len(np.unique(adata_copy.obs['leiden']))))
+    del adata_copy
+    return n_modules
+
 @contextmanager
 def suppress_stdout():
     with open(os.devnull, "w") as devnull:

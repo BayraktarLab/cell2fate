@@ -233,7 +233,7 @@ class Cell2fate_DynamicalModel(QuantileMixin, PyroSampleMixin, PyroSviTrainMixin
                         size = 200, color_map = 'viridis', ax = ax[i,1], show = False)
             sc.pl.umap(adata, color = ['Module ' + str(i) + ' State'], legend_loc = 'on data',
                         size = 200, ax = ax[i,2], show = False,
-                       palette = {'ON': 'lime', 'OFF': 'black', 'Induction': 'lightgreen', 'Repression': 'grey'})
+                       palette =  {'ON': 'lime', 'OFF': 'grey', 'Induction': 'lightgreen', 'Repression': 'orange'})
             plt.tight_layout()
         if save:
             plt.savefig(save)
@@ -443,7 +443,7 @@ class Cell2fate_DynamicalModel(QuantileMixin, PyroSampleMixin, PyroSviTrainMixin
                 del adata.layers['Velocity']
 
     def compare_module_activation(self, adata, chosen_modules, time_max = None, time_min = 0,
-                                 save = None):
+                                 save = None, ncol = 1):
         n_modules = self.module.model.n_modules
         fig, ax = plt.subplots(1, 1, figsize=(18, 5))
         for m in chosen_modules:
@@ -470,11 +470,11 @@ class Cell2fate_DynamicalModel(QuantileMixin, PyroSampleMixin, PyroSviTrainMixin
             ax.set_ylabel('Total Spliced UMI Counts')
             if time_max or time_min > 0:
                 ax.set_xlim(time_min, time_max)
-            ax.legend(frameon=False)
+            ax.legend(frameon=False, ncol = ncol)
             ax.set_title('Module Activation Across Cells In Dataset')
             if save:
-                plt.savefig(save)   
-
+                plt.savefig(save) 
+            
     def plot_technical_variables(self, adata, save = False):
         '''Plots posterior of technical variables in the model.'''
         fig, ax = plt.subplots(3, 2, figsize = (12, 9))
@@ -544,7 +544,7 @@ class Cell2fate_DynamicalModel(QuantileMixin, PyroSampleMixin, PyroSviTrainMixin
             self.plot_history(int(np.round(self.max_epochs/2)))
         multiplot_from_generator(generatePlots(), 4)
 
-    def get_module_top_features(self, adata, species = 'Mouse', p_adj_cutoff = 0.01):
+    def get_module_top_features(self, adata, background, species = 'Mouse', p_adj_cutoff = 0.01, n_top_genes = None):
         '''Returns dataframe with top Genes, TFs and GO terms of each module'''
         tab = pd.DataFrame(columns = ('Module Number', 'Genes Ranked', 'TFs Ranked', 'Terms Ranked'))
         tab['Module Number'] = list(range(self.module.model.n_modules))
@@ -578,26 +578,29 @@ class Cell2fate_DynamicalModel(QuantileMixin, PyroSampleMixin, PyroSviTrainMixin
         ### Select n_genes/n_modules top genes for each module
         ### Find enriched GO terms
         n_modules = self.module.model.n_modules
-        n_top_genes = int(self.module.model.n_vars/n_modules/2)
+        results = []
+        if not n_top_genes:
+            n_top_genes = int(self.module.model.n_vars/n_modules/2)
         for m in range(n_modules):
             gene_list = list(gene_by_module_sorted[m,:n_top_genes])
             if species == 'Mouse':
                 enr = gp.enrichr(gene_list=gene_list,
-                                 background = adata.var_names,
-                         gene_sets=['GO_Biological_Process_2021', 'GO_Cellular_Component_2021', 'KEGG_2019_Mouse'],
+                                 background = background,
+                         gene_sets=['GO_Biological_Process_2021'], # 'GO_Cellular_Component_2021', 'KEGG_2019_Mouse'
                          organism='mouse', # don't forget to set organism to the one you desired! e.g. Yeast
                          outdir=None, # don't write to disk
                         )
             elif species == 'Human':
                 enr = gp.enrichr(gene_list=gene_list,
-                         background = adata.var_names,
+                         background = background,
                      gene_sets=['GO_Biological_Process_2021', 'GO_Cellular_Component_2021', 'KEGG_2021_Human'],
                      organism='human', # don't forget to set organism to the one you desired! e.g. Yeast
                      outdir=None, # don't write to disk
                     )
             tab.iloc[m,3] = ', '.join(list(enr.results.loc[enr.results['Adjusted P-value'] < p_adj_cutoff,:]['Term']))
+            results += [enr.results.loc[enr.results['Adjusted P-value'] < p_adj_cutoff,:]]
         ### Save topGenes, topTFs and topGOterms in dataframe.
-        return tab
+        return tab, results
     
     def plot_top_features(self, adata, tab, chosen_modules, mode = 'all genes',
                       n_top_features = 3, save = False, process = True):
@@ -619,3 +622,117 @@ class Cell2fate_DynamicalModel(QuantileMixin, PyroSampleMixin, PyroSviTrainMixin
                             size = 200, ncols = n_top_features, show = False, ax = ax[i,j])
         if save:
             plt.savefig(save)
+            
+    def plot_module_summary_statistics_2(self, adata, chosen_modules, chosen_clusters,
+                                     marker_genes, marker_TFs, cluster_key = 'clusters', save = None):
+        'tbd'
+        adata.X = adata.layers['unspliced'] + adata.layers['spliced']
+        sc.pp.normalize_total(adata, target_sum=1e4)
+        sc.pp.log1p(adata)
+        sc.pp.scale(adata, max_value=10)
+        plt.rcParams.update({'font.size': 14})
+        subset = np.array([c in chosen_clusters for c in adata.obs[cluster_key]])
+        plt.scatter(1, 1, label='Induction', s = 100, c='lightgreen')
+        plt.scatter(1, 1, label='ON', s = 100, c='lime')
+        plt.scatter(1, 1, label='Repression', s = 100, c='orange')
+        plt.scatter(1, 1, label='OFF', s = 100, c='grey')
+        plt.legend()
+        if save:
+            plt.savefig(save[:-4] + '_legend.pdf')
+        plt.show()
+        fig, ax = plt.subplots(4, len(chosen_modules), figsize = (3*len(chosen_modules), 20))
+        adata = adata[subset,:]
+        for i in range(len(chosen_modules)):
+            m = chosen_modules[i]
+            sc.pl.umap(adata, color = ['Module ' + str(m) + ' Activation'], legend_loc = None,
+                        size = 200, color_map = 'viridis', ax = ax[0,i], show = False, s = 300)
+            sc.pl.umap(adata, color = ['Module ' + str(m) + ' State'], 
+                        size = 200, ax = ax[1,i], show = False, legend_fontsize = 'x-large', s = 300, legend_loc = 'right_margin',
+                       palette = {'ON': 'lime', 'OFF': 'grey', 'Induction': 'lightgreen', 'Repression': 'orange'})
+            sc.pl.umap(adata, color = marker_genes[i], legend_loc = 'right margin',
+                            size = 200, show = False, ax = ax[2,i])
+            sc.pl.umap(adata, color = marker_TFs[i], legend_loc = 'right margin',
+                            size = 200, show = False, ax = ax[3,i])
+            plt.tight_layout()
+        if save:
+            plt.savefig(save)  
+    
+    def example_module_activation(self, adata, chosen_module, time_max = None, time_min = 0,
+                                 save = None):
+        fig, ax = plt.subplots(1, 1, figsize=(10, 5))
+        m = chosen_module
+        n_obs = 10000
+        T_c_min = torch.min(torch.tensor(self.samples['post_sample_means']['T_c']))
+        T_c_max = torch.max(torch.tensor(self.samples['post_sample_means']['T_c']))
+        T_c = torch.arange(T_c_min, T_c_max, (T_c_max - T_c_min)/n_obs).unsqueeze(-1).unsqueeze(-1)
+        Tmax = self.samples['post_sample_means']['Tmax']
+        count = 0
+        fraction = 0
+        fraction_list = [fraction]
+        ss_spliced = torch.sum(torch.tensor(self.samples['post_sample_means']['A_mgON'][m,:])\
+                               /torch.tensor(self.samples['post_sample_means']['gamma_g']))
+        abundance = torch.sum(mu_mRNA_continousAlpha_globalTime_twoStates(
+                torch.tensor(self.samples['post_sample_means']['A_mgON'][m,:]),
+                torch.tensor(0.),
+                torch.tensor(self.samples['post_sample_means']['beta_g']),
+                torch.tensor(self.samples['post_sample_means']['gamma_g']),
+                torch.tensor(self.samples['post_sample_means']['lam_mi'][m,:]),
+                T_c[:,:,0],
+                torch.tensor(np.mean(self.samples['post_sample_means']['T_mON'][:,:,m])),
+                torch.tensor(np.mean(self.samples['post_sample_means']['T_mOFF'][:,:,m])),
+                torch.zeros((n_obs+1, self.module.model.n_vars)))[...,1], axis = -1)
+        abundance2 = torch.sum(mu_mRNA_continousAlpha_globalTime_twoStates(
+                torch.tensor(self.samples['post_sample_means']['A_mgON'][m,:]),
+                torch.tensor(0.),
+                torch.tensor(self.samples['post_sample_means']['beta_g']),
+                torch.tensor(self.samples['post_sample_means']['gamma_g']),
+                torch.tensor(self.samples['post_sample_means']['lam_mi'][m,:]),
+                T_c[:,:,0],
+                torch.tensor(np.mean(self.samples['post_sample_means']['T_mON'][:,:,m])),
+                torch.tensor(np.mean(self.samples['post_sample_means']['T_mOFF'][:,:,m]))*1000.,
+                torch.zeros((n_obs+1, self.module.model.n_vars)))[...,1], axis = -1)
+        steady_state = torch.sum(torch.tensor(self.samples['post_sample_means']['A_mgON'][m,:])/torch.tensor(self.samples['post_sample_means']['gamma_g']))
+        plt.axhspan(xmin = 0, xmax = 1, ymin = steady_state*0.95, ymax = steady_state,
+                    facecolor='lime', alpha=0.5)
+        plt.axhspan(xmin = 0, xmax = (np.mean(self.samples['post_sample_means']['T_mOFF'][:,:,m])-time_min)/(time_max-time_min), ymin = steady_state*0.05, ymax = steady_state*0.95,
+                    facecolor='lightgreen', alpha=0.5)
+        plt.axhspan(xmin = (np.mean(self.samples['post_sample_means']['T_mOFF'][:,:,m])-time_min)/(time_max-time_min), xmax = 1,
+                    ymin = steady_state*0.05, ymax = steady_state*0.95,
+                    facecolor='orange', alpha=0.5)
+        plt.axhspan(xmin = 0, xmax = 1,
+                    ymin = steady_state*0, ymax = steady_state*0.05,
+                    facecolor='grey', alpha=0.5)
+        ax.scatter(T_c,
+                   abundance2, s = 3, label = 'Module ' + str(m), c = 'grey', alpha = 0.25)
+        ax.scatter(T_c,
+                   abundance, s = 5, label = 'Module ' + str(m), c = 'black')
+        ax.axhline(xmin = 0, xmax = time_max, y = steady_state, linestyle = '--', linewidth = 1, c = 'black')
+        ax.axhline(xmin = 0, xmax = time_max, y = steady_state*0.05, linestyle = '--', linewidth = 1, c = 'black')
+        ax.axhline(xmin = 0, xmax = time_max, y = steady_state*0.95, linestyle = '--', linewidth = 1, c = 'black')
+        ax.axvline(ymin = 0, ymax = np.float(steady_state), x = np.mean(self.samples['post_sample_means']['T_mOFF'][:,:,m]), linestyle = '--', linewidth = 1, c = 'black')
+        ax.set_xlabel('Time (hours)')
+        ax.set_ylabel('Total Spliced UMI Counts')
+        ax.set_ylim(-10, steady_state+20)
+        if time_max or time_min > 0:
+            ax.set_xlim(time_min, time_max)
+        ax.set_title('Example Module Activation')
+        if save:
+            plt.savefig(save)   
+
+    def plot_genes(self, adata, chosen_clusters, marker_genes, cluster_key = 'clusters', save = None):
+        'Weight, Activation, Velocity, Switch ON/OFF time (histogram)'
+        import matplotlib.pyplot as plt
+        adata.X = adata.layers['unspliced'] + adata.layers['spliced']
+        sc.pp.normalize_total(adata, target_sum=1e4)
+        sc.pp.log1p(adata)
+        sc.pp.scale(adata, max_value=10)
+        plt.rcParams.update({'font.size': 12})
+        subset = np.array([c in chosen_clusters for c in adata.obs[cluster_key]])
+        fig, ax = plt.subplots(1, len(marker_genes), figsize = (3*len(marker_genes), 5))
+        adata = adata[subset,:]
+        for i in range(len(marker_genes)):
+            sc.pl.umap(adata, color = marker_genes[i], legend_loc = 'right margin',
+                            size = 200, show = False, ax = ax[i])
+            plt.tight_layout()
+        if save:
+            plt.savefig(save) 
