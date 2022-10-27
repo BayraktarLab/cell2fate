@@ -1,9 +1,7 @@
 from typing import Optional
-from pyro.infer import SVI, Trace_ELBO
 import torch
 import numpy as np
 import pyro
-from pyro.infer import Predictive
 import pandas as pd
 import scanpy as sc
 import random
@@ -210,109 +208,6 @@ def get_training_data(adata, remove_clusters = None, cells_per_cluster = 100,
     if scipy.sparse.issparse(adata.layers['unspliced']):
         adata.layers['unspliced'] = np.array(adata.layers['unspliced'].toarray(), dtype=np.float32)
     return adata
-        
-def get_training_data_version2(adata, remove_clusters = None, cells_per_cluster = 100000,
-                         cluster_column = 'clusters', min_shared_counts = 20, n_var_genes = 2000,
-                         n_pcs=30, n_neighbors=30):
-    """
-    Reduces and anndata object to the most relevant cells and genes for understanding the differentiation trajectories
-    in the data.
-    
-    Parameters
-    ----------
-    adata
-        anndata
-    remove_clusters
-        names of clusters to be removed
-    cells_per_cluster
-        how many cells to keep per cluster. For Louvain clustering with resolution = 1, keeping more than 300 cells
-        per cluster does not provide much extra information.
-    cluster_column
-        name of the column in adata.obs that contains cluster names
-    min_shared_counts
-        minimum number of spliced+unspliced counts across all cells for a gene to be retained
-    n_var_genes
-        number of top variable genes to retain
-        
-    Returns
-    -------
-    adata object reduced to the most informative cells and genes
-    """
-    total_spliced = np.sum(adata.layers['spliced'], axis = 1)
-    total_unspliced = np.sum(adata.layers['unspliced'], axis = 1)
-    random.seed(a=1)
-    adata = adata[[c not in remove_clusters for c in adata.obs[cluster_column]], :]
-    # Restrict samples per cell type:
-    N = cells_per_cluster
-    print('Keeping at most ' + str(N) + ' cells per cluster')
-    unique_celltypes = np.unique(adata.obs[cluster_column])
-    index = []
-    for i in range(len(unique_celltypes)):
-        if adata.obs[cluster_column].value_counts()[unique_celltypes[i]] > N:
-            subset = np.where(adata.obs[cluster_column] == unique_celltypes[i])[0]
-            subset = random.sample(list(subset), N)
-        else:
-            subset = np.where(adata.obs[cluster_column] == unique_celltypes[i])[0]
-        index += list(subset)
-    adata = adata[index,:]
-    print("Saving raw counts in adata.layers['spliced_raw'] and adata.layers['unspliced_raw']")
-    adata.layers['spliced_raw'] = adata.layers['spliced'] 
-    adata.layers['unspliced_raw'] = adata.layers['unspliced']
-    scv.pp.filter_and_normalize(adata, min_shared_counts=min_shared_counts, n_top_genes=n_var_genes)
-    scv.pp.moments(adata, n_pcs=30, n_neighbors=30)
-    adata.obs['spliced_fraction_retained'] = np.sum(adata.layers['spliced_raw'], axis = 1)/total_spliced[index]
-    adata.obs['unspliced_fraction_retained'] = np.sum(adata.layers['unspliced_raw'], axis = 1)/total_unspliced[index]
-    return adata
-
-def get_training_data_version3(adata, remove_clusters = None, cells_per_cluster = 100,
-                         cluster_column = 'clusters', min_shared_counts = 10, n_var_genes = 2000):
-    """
-    Reduces and anndata object to the most relevant cells and genes for understanding the differentiation trajectories
-    in the data.
-    
-    Parameters
-    ----------
-    adata
-        anndata
-    remove_clusters
-        names of clusters to be removed
-    cells_per_cluster
-        how many cells to keep per cluster. For Louvain clustering with resolution = 1, keeping more than 300 cells
-        per cluster does not provide much extra information.
-    cluster_column
-        name of the column in adata.obs that contains cluster names
-    min_shared_counts
-        minimum number of spliced+unspliced counts across all cells for a gene to be retained
-    n_var_genes
-        number of top variable genes to retain
-        
-    Returns
-    -------
-    adata object reduced to the most informative cells and genes
-    """
-    random.seed(a=1)
-    adata = adata[[c not in remove_clusters for c in adata.obs[cluster_column]], :]
-    # Restrict samples per cell type:
-    N = cells_per_cluster
-    unique_celltypes = np.unique(adata.obs[cluster_column])
-    index = []
-    for i in range(len(unique_celltypes)):
-        if adata.obs[cluster_column].value_counts()[unique_celltypes[i]] > N:
-            subset = np.where(adata.obs[cluster_column] == unique_celltypes[i])[0]
-            subset = random.sample(list(subset), N)
-        else:
-            subset = np.where(adata.obs[cluster_column] == unique_celltypes[i])[0]
-        index += list(subset)
-    adata = adata[index,:]
-    print('Keeping at most ' + str(N) + ' cells per cluster')
-    scv.pp.filter_genes(adata, min_shared_counts=min_shared_counts)
-    sc.pp.normalize_total(adata, target_sum=1e4)
-    scv.pp.filter_genes_dispersion(adata, n_top_genes=n_var_genes)
-    if scipy.sparse.issparse(adata.layers['spliced']):
-        adata.layers['spliced'] = np.array(adata.layers['spliced'].toarray(), dtype=np.float32)
-    if scipy.sparse.issparse(adata.layers['unspliced']):
-        adata.layers['unspliced'] = np.array(adata.layers['unspliced'].toarray(), dtype=np.float32)
-    return adata
 
 def G_a(mu, sd):
     # Converts mean and sd for Gamma distribution into parameter
@@ -321,7 +216,6 @@ def G_a(mu, sd):
 def G_b(mu, sd):
     # Converts mean and sd for Gamma distribution into beta parameter
     return mu/sd**2
-#
 
 def mu_alpha(alpha_new, alpha_old, tau, lam):
     '''Calculates transcription rate as a function of new target transcription rate,
@@ -329,22 +223,6 @@ def mu_alpha(alpha_new, alpha_old, tau, lam):
     return (alpha_new - alpha_old) * (1 - torch.exp(-lam*tau)) + alpha_old
 
 def mu_mRNA_continuousAlpha(alpha, beta, gamma, tau, u0, s0, delta_alpha, lam):
-    ''' Calculates expected value of spliced and unspliced counts as a function of rates, latent time, initial states,
-    difference to transcription rate in previous state and rate of exponential change process between states.'''
-    
-    mu_u = u0*torch.exp(-beta*tau) + (alpha/beta)* (1 - torch.exp(-beta*tau)) + delta_alpha/(beta-lam)*(torch.exp(-beta*tau) - torch.exp(-lam*tau))
-    mu_s = (s0*torch.exp(-gamma*tau) + 
-    alpha/gamma * (1 - torch.exp(-gamma*tau)) +
-    (alpha - beta * u0)/(gamma - beta + 10**(-5)) * (torch.exp(-gamma*tau) - torch.exp(-beta*tau)) +
-    (delta_alpha*beta)/((beta - lam + 10**(-5))*(gamma - beta + 10**(-5))) * (torch.exp(-beta*tau) - torch.exp(-gamma*tau))-
-    (delta_alpha*beta)/((beta - lam + 10**(-5))*(gamma - lam + 10**(-5))) * (torch.exp(-lam*tau) - torch.exp(-gamma*tau)))
-
-    return torch.stack([mu_u, mu_s], axis = 2)
-
-def c(x, m = 10**(-100)):
-    return torch.clip(x, min = m)
-
-def mu_mRNA_continuousAlpha_withPlates(alpha, beta, gamma, tau, u0, s0, delta_alpha, lam):
     ''' Calculates expected value of spliced and unspliced counts as a function of rates, latent time, initial states,
     difference to transcription rate in previous state and rate of exponential change process between states.'''
     
@@ -356,23 +234,6 @@ def mu_mRNA_continuousAlpha_withPlates(alpha, beta, gamma, tau, u0, s0, delta_al
     (delta_alpha*beta)/((beta - lam+10**(-5))*(gamma - lam+10**(-5))) * (torch.exp(-lam*tau) - torch.exp(-gamma*tau)))
 
     return torch.stack([mu_u, mu_s], axis = -1)
-
-def mu_mRNA_discreteAlpha_localTime_twoStates(alpha_ON, alpha_OFF, beta, gamma, tau, t0):
-    '''Calculates expected value of spliced and unspliced counts as a function of rates,
-    local latent time, initial states and switch time between two states'''
-    n_cells = tau.shape[0]
-    n_genes = alpha_ON.shape[1]
-    # Transcription rate in each cell for each gene:
-    boolean = (tau < t0).reshape(n_cells, n_genes)
-    alpha_cg = alpha_ON*boolean + alpha_OFF*~boolean
-    # Time since changepoint for each cell and gene:
-    tau_cg = tau*boolean + (tau - t0)*~boolean
-    # Initial condition for each cell and gene:
-    initial_state = mu_mRNA_discreteAlpha(alpha_ON, beta, gamma, t0, torch.zeros(n_cells,n_genes), torch.zeros(n_cells,n_genes))
-    u0_g = ~boolean*initial_state[:,:,0]
-    s0_g = ~boolean*initial_state[:,:,1]
-    # Unspliced and spliced counts for each gene in each cell:
-    return mu_mRNA_discreteAlpha(alpha_cg, beta, gamma, tau_cg, u0_g, s0_g)
 
 def mu_mRNA_continousAlpha_globalTime_twoStates(alpha_ON, alpha_OFF, beta, gamma, lam_gi, T_c, T_gON, T_gOFF, Zeros):
     '''Calculates expected value of spliced and unspliced counts as a function of rates,
@@ -388,7 +249,7 @@ def mu_mRNA_continousAlpha_globalTime_twoStates(alpha_ON, alpha_OFF, beta, gamma
     tau_cg = tau*boolean + (tau - t0)*~boolean
     # Initial condition for each cell and gene:
     lam_g = ~boolean*lam_gi[:,1] + boolean*lam_gi[:,0]
-    initial_state = mu_mRNA_continuousAlpha_withPlates(alpha_ON, beta, gamma, t0,
+    initial_state = mu_mRNA_continuousAlpha(alpha_ON, beta, gamma, t0,
                                                        Zeros, Zeros, alpha_ON-alpha_OFF, lam_gi[:,0])
     initial_alpha = mu_alpha(alpha_ON, alpha_OFF, t0, lam_gi[:,0])
     u0_g = 10**(-5) + ~boolean*initial_state[:,:,0]
@@ -396,6 +257,6 @@ def mu_mRNA_continousAlpha_globalTime_twoStates(alpha_ON, alpha_OFF, beta, gamma
     delta_alpha = ~boolean*initial_alpha*(-1) + boolean*alpha_ON*(1)
     alpha_0 = alpha_OFF + ~boolean*initial_alpha
     # Unspliced and spliced count variance for each gene in each cell:
-    mu_RNAvelocity = torch.clip(mu_mRNA_continuousAlpha_withPlates(alpha_cg, beta, gamma, tau_cg,
+    mu_RNAvelocity = torch.clip(mu_mRNA_continuousAlpha(alpha_cg, beta, gamma, tau_cg,
                                                          u0_g, s0_g, delta_alpha, lam_g), min = 10**(-5))
     return mu_RNAvelocity

@@ -29,8 +29,8 @@ import scipy
 import gseapy as gp
 from cell2fate._pyro_base_cell2fate_module import Cell2FateBaseModule
 from cell2fate._pyro_mixin import PltExportMixin, QuantileMixin
-from ._cell2fate_ModularTranscriptionRate_module_singleLineage_GlobalTime_FlexibleSwitchTime import \
-Cell2fate_ModularTranscriptionRate_module_SingleLineage_GlobalTime_FlexibleSwitchTime
+from ._cell2fate_DynamicalModel_module import \
+Cell2fate_DynamicalModel_module
 from cell2fate.utils import multiplot_from_generator
 
 from cell2fate.utils import mu_mRNA_continousAlpha_globalTime_twoStates
@@ -66,7 +66,7 @@ class Cell2fate_DynamicalModel(QuantileMixin, PyroSampleMixin, PyroSviTrainMixin
         super().__init__(adata)
 
         if model_class is None:
-            model_class = Cell2fate_ModularTranscriptionRate_module_SingleLineage_GlobalTime_FlexibleSwitchTime
+            model_class = Cell2fate_DynamicalModel_module
 
         self.module = Cell2FateBaseModule(
             model=model_class,
