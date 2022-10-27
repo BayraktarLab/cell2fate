@@ -2,7 +2,9 @@
 
 ## Usage and Tutorials
 
-The currently recommended workflow using the currently best performing model is in this tutorial [here](https://github.com/AlexanderAivazidis/cell2fate/blob/main/notebooks/cell2fate_tutorial_pancreas.ipynb).
+The standard recommended workflow for using cell2fate can be found in this this tutorial [here](https://github.com/AlexanderAivazidis/cell2fate/blob/main/notebooks/cell2fate_PancreasWithCC.ipynb).
+For further notebooks and examples including more datasets and integration with cell2location we have more notebooks [here]
+(https://github.com/AlexanderAivazidis/cell2fate/blob/main/notebooks/)
 
 ## Installation
 
