@@ -2,8 +2,8 @@
 
 ## Usage and Tutorials
 
-The standard recommended workflow for using cell2fate can be found in this this tutorial [here](https://github.com/AlexanderAivazidis/cell2fate/blob/main/notebooks/cell2fate_PancreasWithCC.ipynb).
-For further notebooks and examples including more datasets and integration with cell2location we have more notebooks [here](https://github.com/AlexanderAivazidis/cell2fate/blob/main/notebooks/)
+The standard recommended workflow for using cell2fate can be found in this this tutorial [here](https://github.com/BayraktarLab/cell2fate/blob/main/notebooks/cell2fate_PancreasWithCC.ipynb).
+For further notebooks and examples including more datasets and integration with cell2location we have more notebooks [here](https://github.com/BayraktarLab/cell2fate/blob/main/notebooks/)
 
 ## Installation
 
@@ -15,7 +15,7 @@ Create a conda environment and install the `cell2fate` package.
 conda create -y -n cell2fate_env python=3.9
 
 conda activate cell2fate_env
-pip install git+https://github.com/AlexanderAivazidis/cell2fate
+pip install git+https://github.com/BayraktarLab/cell2fate
 ```
 
 To use this environment in a jupyter notebook, add a jupyter kernel for this environment:
