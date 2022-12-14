@@ -1,1 +1,3 @@
-include cell2fate *.txt
+include cell2fate/Human_TFs.txt
+include cell2fate/Mouse_TFs.txt
+
