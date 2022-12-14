@@ -441,6 +441,38 @@ class Cell2fate_DynamicalModel(QuantileMixin, PyroSampleMixin, PyroSviTrainMixin
             del adata.layers['Spliced Mean']
             if delete:
                 del adata.layers['Velocity']
+                
+    def compute_and_plot_total_velocity_scvelo(self, adata, delete = True, plot = True, save = None,
+                                     plotting_kwargs = {"color": 'clusters', 'legend_fontsize': 10, 'legend_loc': 'right_margin'}):
+        """
+        Computes total RNA velocity, as well as associated "velocity graph" and 
+        then plots results on a UMAP based on the method in:
+        "Bergen et al. (2020), Generalizing RNA velocity to transient cell states through dynamical modeling"
+        """
+        print('Computing total RNAvelocity ...')
+
+        with contextlib.redirect_stdout(io.StringIO()):
+            adata.layers['Mu'] = self.samples['post_sample_means']['mu_expression'][...,0]
+            adata.layers['Ms'] = self.samples['post_sample_means']['mu_expression'][...,1]
+            adata.layers['velocity'] = torch.tensor(self.samples['post_sample_means']['beta_g']) * \
+            self.samples['post_sample_means']['mu_expression'][...,0] - \
+            torch.tensor(self.samples['post_sample_means']['gamma_g']) * \
+            self.samples['post_sample_means']['mu_expression'][...,1]
+            scv.pp.neighbors(adata)
+            scv.tl.velocity_graph(adata, vkey = 'velocity')
+            scv.tl.velocity_embedding(adata, vkey = 'velocity')
+
+            if plot:
+                fix, ax = plt.subplots(1, 1, figsize = (6, 4))
+                scv.pl.velocity_embedding_stream(adata, basis='umap', save = False, vkey='velocity',
+                                                 **plotting_kwargs, show = False, ax = ax)
+                if save:
+                    plt.savefig(save)
+                    
+            del adata.layers['Ms']
+            del adata.layers['Mu']
+            if delete:
+                del adata.layers['velocity']
 
     def compare_module_activation(self, adata, chosen_modules, time_max = None, time_min = 0,
                                  save = None, ncol = 1):
