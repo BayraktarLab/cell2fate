@@ -409,9 +409,8 @@ class Cell2fate_DynamicalModel(QuantileMixin, PyroSampleMixin, PyroSviTrainMixin
                 del adata.layers['Module ' + str(m) + ' Velocity']
                 
         if save:
-            plt.savefig(save)
-
-
+            plt.savefig(save)     
+            
     def compute_and_plot_total_velocity(self, adata, delete = True, plot = True, save = None,
                                      plotting_kwargs = {"color": 'clusters', 'legend_fontsize': 10, 'legend_loc': 'right_margin'}):
         """
