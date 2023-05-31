@@ -11,6 +11,9 @@ from torch.distributions import biject_to, transform_to
 from ._cell2fate_DynamicalModel import \
 Cell2fate_DynamicalModel
 
+from ._cell2fate_DynamicalModel_SequentialModules import \
+Cell2fate_DynamicalModel_SequentialModules
+
 try:
     import importlib.metadata as importlib_metadata
 except ModuleNotFoundError:
