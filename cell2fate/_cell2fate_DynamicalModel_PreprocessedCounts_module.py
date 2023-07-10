@@ -13,7 +13,7 @@ from pyro.infer import config_enumerate
 from pyro.ops.indexing import Vindex
 from torch.distributions import constraints
 
-class Cell2fate_DynamicalModel_SequentialModules_IdentityDependent_module(PyroModule):
+class Cell2fate_DynamicalModel_PreprocessedCounts_module(PyroModule):
     r"""
     - Models spliced and unspliced counts for each gene as a dynamical process in which transcriptional modules switch on
     at one point in time and increase the transcription rate by different values across genes and then optionally switches off
@@ -32,7 +32,7 @@ class Cell2fate_DynamicalModel_SequentialModules_IdentityDependent_module(PyroMo
         n_batch,
         n_extra_categoricals=None,
         n_modules = 10,
-        stochastic_v_ag_hyp_prior={"alpha": 6.0, "beta": 3.0},
+        sigma_g_hyp_prior={"alpha": 6.0, "beta": 3.0},
         factor_prior={"rate": 1.0, "alpha": 1.0, "states_per_gene": 3.0},
         t_switch_alpha_prior = {"mean": 1000., "alpha": 1000.},
         splicing_rate_hyp_prior={"mean": 1.0, "alpha": 5.0,
@@ -75,7 +75,7 @@ class Cell2fate_DynamicalModel_SequentialModules_IdentityDependent_module(PyroMo
         self.n_extra_categoricals = n_extra_categoricals
         self.factor_prior = factor_prior
         
-        self.stochastic_v_ag_hyp_prior = stochastic_v_ag_hyp_prior
+        self.sigma_g_hyp_prior = sigma_g_hyp_prior
         self.gene_add_alpha_hyp_prior = gene_add_alpha_hyp_prior
         self.gene_add_mean_hyp_prior = gene_add_mean_hyp_prior
         self.detection_hyp_prior = detection_hyp_prior
@@ -171,12 +171,12 @@ class Cell2fate_DynamicalModel_SequentialModules_IdentityDependent_module(PyroMo
         )
 
         self.register_buffer(
-            "stochastic_v_ag_hyp_prior_alpha",
-            torch.tensor(self.stochastic_v_ag_hyp_prior["alpha"]),
+            "sigma_g_hyp_prior_alpha",
+            torch.tensor(self.sigma_g_hyp_prior["alpha"]),
         )
         self.register_buffer(
-            "stochastic_v_ag_hyp_prior_beta",
-            torch.tensor(self.stochastic_v_ag_hyp_prior["beta"]),
+            "sigma_g_hyp_prior_beta",
+            torch.tensor(self.sigma_g_hyp_prior["beta"]),
         )
         self.register_buffer(
             "gene_add_alpha_hyp_prior_alpha",
@@ -214,7 +214,6 @@ class Cell2fate_DynamicalModel_SequentialModules_IdentityDependent_module(PyroMo
         self.register_buffer("zeros", torch.zeros(self.n_obs, self.n_vars))
         self.register_buffer("ones_g", torch.ones((1,self.n_vars,1)))
         self.register_buffer("ones_m", torch.ones(n_modules))
-        self.register_buffer("zeros_mg", torch.zeros(self.n_modules, self.n_vars))
         
         # Register parameters for activation rate hyperprior:
         self.register_buffer(
@@ -378,29 +377,15 @@ class Cell2fate_DynamicalModel_SequentialModules_IdentityDependent_module(PyroMo
             .expand([1, self.n_vars])
             .to_event(2)
         )
-        # Sequential dependence between modules:
-        g_fg_list = [] #(g_fg corresponds to module's spliced counts in steady state)
-        g_fg_list += [pyro.sample( 
-            "g_0g",
+        g_fg = pyro.sample( # (g_fg corresponds to module's spliced counts in steady state)
+            "g_fg",
             dist.Gamma(
                 self.factor_states_per_gene / self.n_factors_torch,
                 self.ones / factor_level_g,
             )
-            .expand([1, self.n_vars])
+            .expand([self.n_modules, self.n_vars])
             .to_event(2)
-        )]
-        for m in range(1, self.n_modules):
-            mean = self.one * g_fg_list[-1] + 10**(-5) # i.e. function that links modules over time is simply identity matrix
-            alpha = 0.1
-            g_fg_list += [pyro.sample( # (g_fg corresponds to module's spliced counts in steady state)
-            "g_" + str(m) + 'g',
-            dist.Gamma(
-                self.one*alpha,
-                self.one*alpha/mean,
-            )
-            .expand([1, self.n_vars])
-            .to_event(2))]
-        g_fg = torch.stack(g_fg_list, axis = 0)
+        )
         A_mgON = pyro.deterministic('A_mgON', g_fg*gamma_g) # (transform from spliced counts to transcription rate)
         A_mgOFF = self.alpha_OFFg        
         # Activation and Deactivation rate:
@@ -421,115 +406,48 @@ class Cell2fate_DynamicalModel_SequentialModules_IdentityDependent_module(PyroMo
         with obs_plate:
             t_c = pyro.sample('t_c', dist.Normal(t_c_loc, t_c_scale).expand([batch_size, 1, 1]))
         T_c = pyro.deterministic('T_c', t_c*T_max)
+        # Global switch on time for each gene:
+#         t_mON = pyro.sample('t_mON', dist.Uniform(self.zero, self.one).expand([1, 1, self.n_modules]).to_event(2))
         t_delta = pyro.sample('t_delta', dist.Gamma(self.one*20, self.one * 20 *self.n_modules_torch).
                               expand([self.n_modules]).to_event(1))
         t_mON = torch.cumsum(torch.concat([self.zero.unsqueeze(0), t_delta[:-1]]), dim = 0).unsqueeze(0).unsqueeze(0)
         T_mON = pyro.deterministic('T_mON', T_max*t_mON)
-        # Global switch off time for each module:
-        t_mOFF = torch.cumsum(t_delta, 0).unsqueeze(0).unsqueeze(0)
-        T_mOFF = pyro.deterministic('T_mOFF', T_max*t_mOFF)
+        # Global switch off time for each gene:
+        t_mOFF = pyro.sample('t_mOFF', dist.Exponential(self.n_modules_torch).expand([1, 1, self.n_modules]).to_event(2))
+        T_mOFF = pyro.deterministic('T_mOFF', T_mON + T_max*t_mOFF)
         
         # =========== Mean expression according to RNAvelocity model ======================= #
-        # (summing over all independent modules)
+        # (summing over all independent modules) I_cm[idx,:,m].unsqueeze(-1)*
         mu_total = torch.stack([self.zeros[idx,...], self.zeros[idx,...]], axis = -1)
         for m in range(self.n_modules):
             mu_total += mu_mRNA_continousAlpha_globalTime_twoStates(
                 A_mgON[m,:], A_mgOFF, beta_g, gamma_g, lam_mi[m,...], T_c[:,:,0], T_mON[:,:,m], T_mOFF[:,:,m], self.zeros[idx,...])
         mu_expression = pyro.deterministic('mu_expression', mu_total)
-        
-        # =============Detection efficiency of spliced and unspliced counts =============== #
-        # Cell specific relative detection efficiency with hierarchical prior across batches:
-        detection_mean_y_e = pyro.sample(
-            "detection_mean_y_e",
-            dist.Beta(
-                self.ones * self.detection_mean_hyp_prior_alpha,
-                self.ones * self.detection_mean_hyp_prior_beta,
-            )
-            .expand([self.n_batch, 1])
-            .to_event(2),
-        )
-        detection_hyp_prior_alpha = pyro.deterministic(
-            "detection_hyp_prior_alpha",
-            self.detection_hyp_prior_alpha,
-        )
-
-        beta = detection_hyp_prior_alpha / (obs2sample @ detection_mean_y_e)
-        with obs_plate:
-            detection_y_c = pyro.sample(
-                "detection_y_c",
-                dist.Gamma(detection_hyp_prior_alpha.unsqueeze(dim=-1), beta.unsqueeze(dim=-1)),
-            )  # (self.n_obs, 1)        
-        
-        # Global relative detection efficiency between spliced and unspliced counts
-        detection_y_i = pyro.sample(
-            "detection_y_i",
-            dist.Gamma(
-                self.ones * self.detection_i_prior_alpha,
-                self.ones * self.detection_i_prior_alpha,
-            )
-            .expand([1, 1, 2]).to_event(3)
-        )
-        
-        # Gene specific relative detection efficiency between spliced and unspliced counts
-        detection_y_gi = pyro.sample(
-            "detection_y_gi",
-            dist.Gamma(
-                self.ones * self.detection_gi_prior_alpha,
-                self.ones * self.detection_gi_prior_alpha,
-            )
-            .expand([1, self.n_vars, 2])
-            .to_event(3),
-        )
-        
-        # =======Gene-specific additive component (Ambient RNA/ "Soup") for spliced and unspliced counts ====== #
-        # Independently sampled for spliced and unspliced counts:
-        s_g_gene_add_alpha_hyp = pyro.sample(
-            "s_g_gene_add_alpha_hyp",
-            dist.Gamma(self.gene_add_alpha_hyp_prior_alpha, self.gene_add_alpha_hyp_prior_beta).expand([2]).to_event(1),
-        )
-        s_g_gene_add_mean = pyro.sample(
-            "s_g_gene_add_mean",
-            dist.Gamma(
-                self.gene_add_mean_hyp_prior_alpha,
-                self.gene_add_mean_hyp_prior_beta,
-            )
-            .expand([self.n_batch, 1, 2])
-            .to_event(3),
-        ) 
-        s_g_gene_add_alpha_e_inv = pyro.sample(
-            "s_g_gene_add_alpha_e_inv",
-            dist.Exponential(s_g_gene_add_alpha_hyp).expand([self.n_batch, 1, 2]).to_event(3),
-        )
-        s_g_gene_add_alpha_e = self.ones / s_g_gene_add_alpha_e_inv.pow(2)
-        s_g_gene_add = pyro.sample(
-            "s_g_gene_add",
-            dist.Gamma(s_g_gene_add_alpha_e, s_g_gene_add_alpha_e / s_g_gene_add_mean)
-            .expand([self.n_batch, self.n_vars, 2])
-            .to_event(3),
-        )
 
         # =========Gene-specific overdispersion of spliced and unspliced counts ============== #
         # Overdispersion of unspliced counts:
-        stochastic_v_ag_hyp = pyro.sample(
-        "stochastic_v_ag_hyp",
+        sigma_g_hyp = pyro.sample(
+        "sigma_g_hyp",
         dist.Gamma(
-            self.stochastic_v_ag_hyp_prior_alpha,
-            self.stochastic_v_ag_hyp_prior_beta,
+            self.sigma_g_hyp_prior_alpha,
+            self.sigma_g_hyp_prior_beta,
         ).expand([1, 2]).to_event(2))
-        stochastic_v_ag_inv = pyro.sample(
-            "stochastic_v_ag_inv",
-            dist.Exponential(stochastic_v_ag_hyp)
+        sigma_g_inv = pyro.sample(
+            "sigma_g_inv",
+            dist.Exponential(sigma_g_hyp)
             .expand([1, self.n_vars, 2]).to_event(3),
         ) 
-        stochastic_v_ag = (self.ones / stochastic_v_ag_inv.pow(2))        
+        sigma_g = (self.ones / sigma_g_inv.pow(2))        
 
         # =====================Expected expression ======================= #
         # biological expression
-        mu = pyro.deterministic('mu', (mu_expression + torch.einsum('cbi,bgi->cgi', obs2sample.unsqueeze(dim=-1), s_g_gene_add)) * \
-        detection_y_c * detection_y_i * detection_y_gi)
+        mu = pyro.deterministic('mu', mu_expression)
         
         # =====================DATA likelihood ======================= #
         # Likelihood (sampling distribution) of data_target & add overdispersion via NegativeBinomial
         with obs_plate:
-            pyro.sample("data_target", dist.GammaPoisson(concentration= stochastic_v_ag,
-                       rate= stochastic_v_ag / mu), obs=torch.stack([u_data, s_data], axis = 2))
+            pyro.sample("data_target", dist.Normal(loc=mu,
+                       scale= sigma_g), obs=torch.stack([u_data, s_data], axis = 2))
+            
+            
+            

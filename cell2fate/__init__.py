@@ -17,6 +17,12 @@ Cell2fate_DynamicalModel_SequentialModules
 from ._cell2fate_DynamicalModel_SequentialModules_IdentityDependent import \
 Cell2fate_DynamicalModel_SequentialModules_IdentityDependent
 
+from ._cell2fate_DynamicalModel_SequentialModules_LinearDependent import \
+Cell2fate_DynamicalModel_SequentialModules_LinearDependent
+
+from ._cell2fate_DynamicalModel_PreprocessedCounts import \
+Cell2fate_DynamicalModel_PreprocessedCounts
+
 try:
     import importlib.metadata as importlib_metadata
 except ModuleNotFoundError:

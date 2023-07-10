@@ -13,7 +13,7 @@ from pyro.infer import config_enumerate
 from pyro.ops.indexing import Vindex
 from torch.distributions import constraints
 
-class Cell2fate_DynamicalModel_SequentialModules_IdentityDependent_module(PyroModule):
+class Cell2fate_DynamicalModel_SequentialModules_LinearDependent_module(PyroModule):
     r"""
     - Models spliced and unspliced counts for each gene as a dynamical process in which transcriptional modules switch on
     at one point in time and increase the transcription rate by different values across genes and then optionally switches off
