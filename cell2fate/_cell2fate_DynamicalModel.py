@@ -203,8 +203,6 @@ class Cell2fate_DynamicalModel(QuantileMixin, PyroSampleMixin, PyroSviTrainMixin
                 torch.tensor(self.samples['post_sample_means']['T_mON'][:,:,m]),
                 torch.tensor(self.samples['post_sample_means']['T_mOFF'][:,:,m]),
                 torch.zeros((self.module.model.n_obs, self.module.model.n_vars)))
-            adata.obs['Module ' + str(m) + ' Weight'] = torch.clip(torch.sum(torch.sum(mu_m, axis = -1), axis = -1)/inferred_total,
-                                                                   min = 0.0, max = 1.0)
             ss_total = torch.sum(torch.tensor(self.samples['post_sample_means']['A_mgON'][m,:])/torch.tensor(self.samples['post_sample_means']['gamma_g']) + \
         torch.tensor(self.samples['post_sample_means']['A_mgON'][m,:])/torch.tensor(self.samples['post_sample_means']['beta_g']), axis = 1)
             adata.obs['Module ' + str(m) + ' Activation'] = torch.sum(torch.sum(mu_m, axis = -1), axis = -1)/ss_total
@@ -221,18 +219,18 @@ class Cell2fate_DynamicalModel(QuantileMixin, PyroSampleMixin, PyroSviTrainMixin
             adata.obs['Module ' + str(m) + ' State'
              ][adata.obs['Module ' + str(m) + ' Activation'] < 0.05
               ] = 'OFF'
+            adata.obs['Module ' + str(m) + ' Activation'] = torch.sum(torch.sum(mu_m, axis = -1), axis = -1)
         return adata
 
     def plot_module_summary_statistics(self, adata, save = None):
         'Weight, Activation, Velocity, Switch ON/OFF time (histogram)'
-        fig, ax = plt.subplots(self.module.model.n_modules, 3, figsize = (15, 4*self.module.model.n_modules))
+        limit = np.max([np.sort(adata.obs['Module ' + str(i) + ' Activation'])[int(np.round(0.99*len(adata.obs['Module ' + str(i) + ' Activation'])))] for i in range(self.module.model.n_modules)])
+        fig, ax = plt.subplots(self.module.model.n_modules, 2, figsize = (10, 4*self.module.model.n_modules))
         for i in range(self.module.model.n_modules):
-            sc.pl.umap(adata, color = ['Module ' + str(i) + ' Weight'], legend_loc = None,
-                        size = 200, color_map = 'viridis', ax = ax[i,0], show = False)
             sc.pl.umap(adata, color = ['Module ' + str(i) + ' Activation'], legend_loc = None,
-                        size = 200, color_map = 'viridis', ax = ax[i,1], show = False)
+                        size = 200, color_map = 'viridis', ax = ax[i,0], show = False, vmin = 0, vmax = limit)
             sc.pl.umap(adata, color = ['Module ' + str(i) + ' State'], legend_loc = 'on data',
-                        size = 200, ax = ax[i,2], show = False,
+                        size = 200, ax = ax[i,1], show = False,
                        palette =  {'ON': 'lime', 'OFF': 'grey', 'Induction': 'lightgreen', 'Repression': 'orange'})
             plt.tight_layout()
         if save:
@@ -657,6 +655,8 @@ class Cell2fate_DynamicalModel(QuantileMixin, PyroSampleMixin, PyroSviTrainMixin
     def plot_module_summary_statistics_2(self, adata, chosen_modules, chosen_clusters,
                                      marker_genes, marker_TFs, cluster_key = 'clusters', save = None):
         'tbd'
+        limit = np.max([np.sort(adata.obs['Module ' + str(i) + ' Activation'])[int(np.round(0.99*len(adata.obs['Module ' + str(i) + ' Activation'])))]
+                        for i in chosen_modules])
         adata.X = adata.layers['unspliced'] + adata.layers['spliced']
         sc.pp.normalize_total(adata, target_sum=1e4)
         sc.pp.log1p(adata)
@@ -676,7 +676,8 @@ class Cell2fate_DynamicalModel(QuantileMixin, PyroSampleMixin, PyroSviTrainMixin
         for i in range(len(chosen_modules)):
             m = chosen_modules[i]
             sc.pl.umap(adata, color = ['Module ' + str(m) + ' Activation'], legend_loc = None,
-                        size = 200, color_map = 'viridis', ax = ax[0,i], show = False, s = 300)
+                        size = 200, color_map = 'viridis', ax = ax[0,i], show = False, s = 300,
+                      vmin = 0, vmax = limit)
             sc.pl.umap(adata, color = ['Module ' + str(m) + ' State'], 
                         size = 200, ax = ax[1,i], show = False, legend_fontsize = 'x-large', s = 300, legend_loc = 'right_margin',
                        palette = {'ON': 'lime', 'OFF': 'grey', 'Induction': 'lightgreen', 'Repression': 'orange'})
@@ -686,7 +687,7 @@ class Cell2fate_DynamicalModel(QuantileMixin, PyroSampleMixin, PyroSviTrainMixin
                             size = 200, show = False, ax = ax[3,i])
             plt.tight_layout()
         if save:
-            plt.savefig(save)  
+            plt.savefig(save)
     
     def example_module_activation(self, adata, chosen_module, time_max = None, time_min = 0,
                                  save = None):
