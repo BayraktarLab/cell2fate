@@ -379,6 +379,7 @@ class Cell2fate_DynamicalModel_SequentialModules_LinearDependent_module(PyroModu
             .to_event(2)
         )
         # Sequential dependence between modules:
+        # First module
         g_fg_list = [] #(g_fg corresponds to module's spliced counts in steady state)
         g_fg_list += [pyro.sample( 
             "g_0g",
@@ -389,8 +390,18 @@ class Cell2fate_DynamicalModel_SequentialModules_LinearDependent_module(PyroModu
             .expand([1, self.n_vars])
             .to_event(2)
         )]
+        # Linear dependence between modules:
+        X_gg = pyro.sample( 
+            "X_gg",
+            dist.Gamma(
+                self.one/self.n_vars,
+                self.one,
+            )
+            .expand([self.n_vars, self.n_vars])
+            .to_event(2)
+        )
         for m in range(1, self.n_modules):
-            mean = self.one * g_fg_list[-1] + 10**(-5) # i.e. function that links modules over time is simply identity matrix
+            mean = torch.einsum("ij,kj->kj", X_gg, g_fg_list[-1]) + 10**(-5) # i.e. function that links modules over time
             alpha = 0.1
             g_fg_list += [pyro.sample( # (g_fg corresponds to module's spliced counts in steady state)
             "g_" + str(m) + 'g',

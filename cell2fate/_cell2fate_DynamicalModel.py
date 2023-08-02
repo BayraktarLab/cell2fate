@@ -278,8 +278,8 @@ class Cell2fate_DynamicalModel(QuantileMixin, PyroSampleMixin, PyroSviTrainMixin
         """
         
 #         if sample_kwargs['batch_size'] == None:
-        sample_kwargs['batch_size'] = adata.n_obs
-        print("sample_kwargs['batch_size']", sample_kwargs['batch_size'])
+#         sample_kwargs['batch_size'] = adata.n_obs
+#         print("sample_kwargs['batch_size']", sample_kwargs['batch_size'])
 #         sample_kwargs = sample_kwargs if isinstance(sample_kwargs, dict) else dict()
 
         # generate samples from posterior distributions for all parameters
