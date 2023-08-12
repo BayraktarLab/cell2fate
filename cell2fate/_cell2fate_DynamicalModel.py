@@ -6,6 +6,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 from anndata import AnnData
 from pyro import clear_param_store
+from scvi.model._utils import parse_use_gpu_arg
+from scvi.dataloaders import AnnDataLoader
+from scvi.utils import track
 from scvi import REGISTRY_KEYS
 from scvi.data import AnnDataManager
 from scvi.data.fields import (
@@ -277,10 +280,8 @@ class Cell2fate_DynamicalModel(QuantileMixin, PyroSampleMixin, PyroSviTrainMixin
         adata with posterior added in adata.obs, adata.var and adata.uns
         """
         
-#         if sample_kwargs['batch_size'] == None:
-        sample_kwargs['batch_size'] = adata.n_obs
-#         print("sample_kwargs['batch_size']", sample_kwargs['batch_size'])
-#         sample_kwargs = sample_kwargs if isinstance(sample_kwargs, dict) else dict()
+        if sample_kwargs['batch_size'] == None:
+            sample_kwargs['batch_size'] = adata.n_obs
 
         # generate samples from posterior distributions for all parameters
         # and compute mean, 5%/95% quantiles and standard deviation
@@ -768,3 +769,92 @@ class Cell2fate_DynamicalModel(QuantileMixin, PyroSampleMixin, PyroSviTrainMixin
             plt.tight_layout()
         if save:
             plt.savefig(save) 
+            
+    def _posterior_samples_minibatch(
+        self, use_gpu: bool = None, batch_size: Optional[int] = None, **sample_kwargs
+    ):
+        """
+        Temporary solution for batch sampling problem.
+        
+        Parameters
+        ----------
+        use_gpu
+            Load model on default GPU if available (if None or True),
+            or index of GPU to use (if int), or name of GPU (if str), or use CPU (if False).
+        batch_size
+            Minibatch size for data loading into model. Defaults to `scvi.settings.batch_size`.
+
+        Returns
+        -------
+        dictionary {variable_name: [array with samples in 0 dimension]}
+        """
+        samples = dict()
+
+        _, device = parse_use_gpu_arg(use_gpu)
+
+        batch_size = batch_size if batch_size is not None else settings.batch_size
+
+        train_dl = AnnDataLoader(
+            self.adata_manager, shuffle=False, batch_size=batch_size
+        )
+        # sample local parameters
+        i = 0
+        cell_specific=['t_c', 'T_c', 'mu_expression', 'detection_y_c', 'mu', 'data_target']
+        for tensor_dict in track(
+            train_dl,
+            style="tqdm",
+            description="Sampling local variables, batch: ",
+        ):
+            args, kwargs = self.module._get_fn_args_from_batch(tensor_dict)
+            args = [a.to(device) for a in args]
+            kwargs = {k: v.to(device) for k, v in kwargs.items()}
+            self.to_device(device)
+            if i == 0:
+                return_observed = getattr(sample_kwargs, "return_observed", False)
+                obs_plate_sites = self._get_obs_plate_sites(
+                    args, kwargs, return_observed=return_observed
+                )
+                if len(obs_plate_sites) == 0:
+                    # if no local variables - don't sample
+                    break
+                obs_plate_dim = list(obs_plate_sites.values())[0]
+                sample_kwargs_obs_plate = sample_kwargs.copy()
+                sample_kwargs_obs_plate[
+                    "return_sites"
+                ] = self._get_obs_plate_return_sites(
+                    sample_kwargs["return_sites"], list(obs_plate_sites.keys())
+                )
+
+                sample_kwargs_obs_plate["show_progress"] = False
+
+                samples = self._get_posterior_samples(
+                    args, kwargs, **sample_kwargs_obs_plate
+                )
+            else:
+                samples_ = self._get_posterior_samples(
+                    args, kwargs, **sample_kwargs_obs_plate
+                )
+
+                num_cells_in_batch = samples_['t_c'].shape[1]
+                for k in samples.keys():
+                   
+                    if samples_[k].ndim >1:
+                        if k in cell_specific:
+                            samples[k] =  np.concatenate([samples[k], samples_[k]], axis=1)
+                i += 1
+
+            i += 1
+
+        global_samples = self._get_posterior_samples(args, kwargs, **sample_kwargs)
+        global_samples = {
+            k: v
+            for k, v in global_samples.items()
+            if k not in list(cell_specific)
+        }
+        for k in global_samples.keys():
+            samples[k] = global_samples[k]
+
+
+        self.module.to(device)
+
+        return samples
