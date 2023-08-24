@@ -22,6 +22,7 @@ To use this environment in a jupyter notebook, add a jupyter kernel for this env
 
 ```bash
 conda activate cell2fate_env
+pip install ipykernel
 python -m ipykernel install --user --name=cell2fate_env --display-name='Environment (cell2fate_env)'
 ```
 
