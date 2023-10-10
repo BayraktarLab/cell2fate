@@ -28,6 +28,8 @@ from numpy.linalg import norm
 from scipy.sparse import csr_matrix
 from numpy import inner
 import scvelo as scv
+from scvelo.plotting.velocity_embedding_grid import compute_velocity_on_grid
+from ._velocity_embedding_stream import velocity_embedding_stream_modules
 import scipy
 import gseapy as gp
 from cell2fate._pyro_base_cell2fate_module import Cell2FateBaseModule
@@ -410,6 +412,7 @@ class Cell2fate_DynamicalModel(QuantileMixin, PyroSampleMixin, PyroSviTrainMixin
         if save:
             plt.savefig(save)     
             
+
     def compute_and_plot_total_velocity(self, adata, delete = True, plot = True, save = None,
                                      plotting_kwargs = {"color": 'clusters', 'legend_fontsize': 10, 'legend_loc': 'right_margin'}):
         """
@@ -858,3 +861,93 @@ class Cell2fate_DynamicalModel(QuantileMixin, PyroSampleMixin, PyroSviTrainMixin
         self.module.to(device)
 
         return samples
+
+    def visualize_module_trajectories(self, adata, chosen_module, delete = True, plot = True, save = None, smooth=None, min_mass=None, n_neighbors=None, cutoff_perc=None, plotting_kwargs = {"color": 'clusters', 'legend_fontsize': 10, 'legend_loc': 'on data', 'dpi': 300, 'cmap': 'Greys'}):
+        """
+        Visualize relative module activation trajectories using velocity-based embedding.
+
+        Parameters
+        ----------
+        adata : AnnData
+            Annotated data matrix containing cell information and embeddings.
+        chosen_module : int/str
+            The number / name of the chosen module.
+        delete : bool, optional
+            Delete temporary data structures after use, by default True.
+        plot : bool, optional
+            Whether to generate the plot, by default True.
+        save : str, optional
+            File path to save the generated plot, by default None.
+        smooth : float, optional
+            Smoothing parameter for grid-based velocity calculations, by default None.
+        min_mass : int, optional
+            Minimum cell mass for grid-based velocity calculations, by default None.
+        n_neighbors : int, optional
+            Number of neighbors for grid-based velocity calculations, by default None.
+        cutoff_perc : float, optional
+            Cutoff percentile for adjusting grid-based velocity calculations, by default None.
+        plotting_kwargs : dict, optional
+            Additional keyword arguments for customizing the plot appearance, by default {"color": 'clusters', 'legend_fontsize': 10, 'legend_loc': 'on data', 'dpi': 300, 'cmap': 'inferno'}.
+
+        Returns
+        -------
+        None
+            The function generates a velocity stream plot based on the provided parameters.
+        """
+
+        
+        adata_groups = {}
+        for i in range(len(adata.obs['Module 0 State'])):
+            adata_groups[i]='No'
+        
+        X_emb = np.array(adata.obsm['X_umap'])
+        V_emb = np.array(adata.obsm['velocity_umap'])
+        X_grid, V_grid = compute_velocity_on_grid(
+            X_emb=X_emb,
+            V_emb=V_emb,
+            density=1,
+            smooth=smooth,
+            min_mass=min_mass,
+            n_neighbors=n_neighbors,
+            autoscale=False,
+            adjust_for_stream=True,
+            cutoff_perc=cutoff_perc,
+        )
+        color_array=np.zeros((V_grid[0].shape[0],V_grid[0].shape[1]))
+        
+        #Calculate whether the grid has module specific velocities
+        
+        for a in range(X_grid.shape[1]):
+            for b in range(X_grid.shape[1]):
+                x_up = X_grid[0][a]
+                y_up = X_grid[1][b]
+                if a ==0:
+                    x_down = -1000
+                else:
+                    x_down =  X_grid[0][a-1]
+                if b == 0:
+                    y_down = -1000
+                else:
+                    y_down =  X_grid[1][b-1]
+
+                module_activation=0
+                total_activation=0
+                for i in range(len(adata.obsm['X_umap'])):
+                    if x_down <= adata.obsm['X_umap'][i][0] <= x_up:
+                        if y_down <= adata.obsm['X_umap'][i][1] <= y_up:
+                            for key in adata.obs.keys():
+                                if 'Activation' in key:
+                                    total_activation = total_activation + adata.obs[key][i]
+                                    if key == f'Module {chosen_module} Activation':
+                                        module_activation = module_activation + adata.obs[key][i]
+                           
+                if total_activation != 0:
+                    rel_activation = module_activation / total_activation
+                else:
+                    rel_activation = 0
+                color_array[b][a] = rel_activation
+        
+        plotting_kwargs['arrow_color']=color_array
+        velocity_embedding_stream_modules(adata, basis='umap', save = False, vkey='velocity', modules=[chosen_module], **plotting_kwargs, show = False)
+            
+            
