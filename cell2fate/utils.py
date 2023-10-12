@@ -80,7 +80,10 @@ def robust_optimization(mod, save_dir, max_epochs = [200, 400], lr = [0.01, 0.01
     ax[1].set_ylabel("-ELBO loss")
     plt.tight_layout()
     plt.show()
-
+    
+    print('-ELBO second run:', np.mean(np.array(history1['elbo_train'][-40:])))
+    print('-ELBO third run:', np.mean(np.array(history2['elbo_train'][-40:])))
+    
     if np.mean(np.array(history1['elbo_train'][-40:])) > np.mean(np.array(history2['elbo_train'][-40:])):
         return mod2
     else:
