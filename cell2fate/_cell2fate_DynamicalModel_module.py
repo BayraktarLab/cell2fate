@@ -366,7 +366,7 @@ class Cell2fate_DynamicalModel_module(PyroModule):
         degredation_alpha = pyro.sample('degredation_alpha',
                               dist.Gamma(self.degredation_rate_alpha_hyp_prior_alpha,
                               self.degredation_rate_alpha_hyp_prior_alpha/self.degredation_rate_alpha_hyp_prior_mean))
-        degredation_alpha = degredation_alpha + 0.000001
+        degredation_alpha = degredation_alpha + 0.001
         degredation_mean = pyro.sample('degredation_mean',
                               dist.Gamma(self.degredation_rate_mean_hyp_prior_alpha,
                               self.degredation_rate_mean_hyp_prior_alpha/self.degredation_rate_mean_hyp_prior_mean))
@@ -504,7 +504,7 @@ class Cell2fate_DynamicalModel_module(PyroModule):
             self.stochastic_v_ag_hyp_prior_alpha,
             self.stochastic_v_ag_hyp_prior_beta,
         ).expand([1, 2]).to_event(2))
-        stochastic_v_ag_hyp = stochastic_v_ag_hyp + 0.000001
+        stochastic_v_ag_hyp = stochastic_v_ag_hyp + 0.001
         stochastic_v_ag_inv = pyro.sample(
             "stochastic_v_ag_inv",
             dist.Exponential(stochastic_v_ag_hyp)
