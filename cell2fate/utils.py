@@ -14,6 +14,80 @@ import matplotlib.pyplot as plt
 from contextlib import contextmanager
 import seaborn as sns
 import os,sys
+import cell2fate as c2f
+
+import torch
+
+def robust_optimization(mod, save_dir, max_epochs = [200, 400], lr = [0.01, 0.01]):
+    n_modules = mod.module.model.n_modules
+    adata = mod.adata
+    print('First optimization run.')
+    mod.train(use_gpu=True, max_epochs = max_epochs[0], lr = lr[0])
+    sample_kwarg = {"num_samples": 1, "batch_size" : 1000,
+                     "use_gpu" : True, 'return_samples': False}
+    mod.adata = mod.export_posterior(mod.adata, sample_kwargs=sample_kwarg)
+    t_c = np.argsort(np.array(mod.samples['post_sample_means']['t_c']).flatten())/len(np.array(mod.samples['post_sample_means']['t_c']))
+    t_c_reversed = -1*(t_c - np.max(t_c))
+    print('Second optimization run.')
+    del mod
+    mod1 = c2f.Cell2fate_DynamicalModel(adata, n_modules = n_modules, init_vals = {'t_c': torch.tensor(t_c).reshape([len(t_c), 1, 1])})
+    mod1.train(use_gpu=True, max_epochs = max_epochs[1], lr = lr[1])
+    history1 = mod1.history
+    mod1.save(save_dir+'c2f_model', overwrite=True)
+    mod1.adata.write(save_dir+"c2f_model_anndata.h5ad")
+    del mod1
+    print('Third optimization run.')
+    mod2 = c2f.Cell2fate_DynamicalModel(adata, n_modules = n_modules, init_vals = {'t_c': torch.tensor(t_c_reversed).reshape([len(t_c_reversed), 1, 1])})
+    del adata
+    mod2.train(use_gpu=True, max_epochs = max_epochs[1], lr = lr[1])
+    history2 = mod2.history
+
+    iter_start=0
+    iter_end=-1
+
+    fig, ax = plt.subplots(1,2, figsize = (15,5))
+
+    iter_end = len(history1["elbo_train"])
+
+    ax[0].plot(
+        history1["elbo_train"].index[iter_start:iter_end],
+        np.array(history1["elbo_train"].values.flatten())[iter_start:iter_end],
+        label="Original Direction",
+    )
+    ax[0].plot(
+        history2["elbo_train"].index[iter_start:iter_end],
+        np.array(history2["elbo_train"].values.flatten())[iter_start:iter_end],
+        label="Reversed Direction",
+    )
+    ax[0].legend()
+    ax[0].set_xlim(0, len(history1["elbo_train"]))
+    ax[0].set_xlabel("Training epochs")
+    ax[0].set_ylabel("-ELBO loss")
+
+    ax[1].plot(
+        history1["elbo_train"].index[iter_start:iter_end],
+        np.array(history1["elbo_train"].values.flatten())[iter_start:iter_end],
+        label="Original Direction",
+    )
+    ax[1].plot(
+        history2["elbo_train"].index[iter_start:iter_end],
+        np.array(history2["elbo_train"].values.flatten())[iter_start:iter_end],
+        label="Reversed Direction",
+    )
+    ax[1].legend()
+    ax[1].set_xlim(np.round(0.8*len(history1["elbo_train"])), len(history1["elbo_train"]))
+    ax[1].set_xlabel("Training epochs")
+    ax[1].set_ylabel("-ELBO loss")
+    plt.tight_layout()
+    plt.show()
+
+    if np.mean(np.array(history1['elbo_train'][-40:])) > np.mean(np.array(history2['elbo_train'][-40:])):
+        return mod2
+    else:
+        del mod2
+        adata = sc.read_h5ad(save_dir+"c2f_model_anndata.h5ad")
+        mod1 = c2f.Cell2fate_DynamicalModel.load(save_dir+'c2f_model', adata)
+        return mod1 
 
 def get_max_modules(adata):
     print('Leiden clustering ...')
