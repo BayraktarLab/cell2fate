@@ -11,7 +11,7 @@ from scvi.nn import one_hot
 from cell2fate.utils import G_a, G_b, mu_mRNA_continousAlpha_globalTime_twoStates
 from pyro.infer import config_enumerate
 from pyro.ops.indexing import Vindex
-from torch.distributions import constraints
+from pyro.distributions import constraints
 
 class Cell2fate_DynamicalModel_PreprocessedCounts_module(PyroModule):
     r"""
@@ -371,7 +371,7 @@ class Cell2fate_DynamicalModel_PreprocessedCounts_module(PyroModule):
                               self.degredation_rate_mean_hyp_prior_alpha/self.degredation_rate_mean_hyp_prior_mean))
         gamma_g = pyro.sample('gamma_g', dist.Gamma(degredation_alpha, degredation_alpha/degredation_mean).expand([1,self.n_vars]).to_event(2))
         # Transcription rate contribution of each module:
-        factor_level_g = pyro.sample(
+        factor_level_g = 0.001 + pyro.sample(
             "factor_level_g",
             dist.Gamma(self.factor_prior_alpha, self.factor_prior_beta)
             .expand([1, self.n_vars])
