@@ -11,8 +11,17 @@ from torch.distributions import biject_to, transform_to
 from ._cell2fate_DynamicalModel import \
 Cell2fate_DynamicalModel
 
+from ._cell2fate_DynamicalModel_FreeModules import \
+Cell2fate_DynamicalModel_FreeModules
+
+from ._cell2fate_DynamicalModelTimeAsParam import \
+Cell2fate_DynamicalModelTimeAsParam
+
 from ._cell2fate_DynamicalModel_SequentialModules import \
 Cell2fate_DynamicalModel_SequentialModules
+
+from ._cell2fate_DynamicalModel_TimeMixture import \
+Cell2fate_DynamicalModel_TimeMixture
 
 # from ._cell2fate_DynamicalModel_SequentialModules_DcdiDependent import \
 # Cell2fate_DynamicalModel_SequentialModules_DcdiDependent
