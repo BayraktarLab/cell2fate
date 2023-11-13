@@ -32,7 +32,7 @@ from scvelo.plotting.velocity_embedding_grid import compute_velocity_on_grid
 from ._velocity_embedding_stream import velocity_embedding_stream_modules
 import scipy
 import gseapy as gp
-from cell2fate._pyro_base_cell2fate_module_MultivariateNormalGuide import Cell2FateBaseModule
+from cell2fate._pyro_base_cell2fate_module import Cell2FateBaseModule
 from cell2fate._pyro_mixin import PltExportMixin, QuantileMixin
 from ._cell2fate_DynamicalModel_module_TimeMixture import \
 Cell2fate_DynamicalModel_module_TimeMixture
@@ -72,12 +72,31 @@ class Cell2fate_DynamicalModel_TimeMixture(QuantileMixin, PyroSampleMixin, PyroS
 
         if model_class is None:
             model_class = Cell2fate_DynamicalModel_module_TimeMixture
-
+        
+        correlation_leiden2 = torch.corrcoef(torch.concat([torch.mean(torch.tensor(adata.X[adata.obs['leiden2'] == x,:]),
+                                                           axis = 0).unsqueeze(0) for x in np.unique(adata.obs['leiden2'])]))
+        correlated_clusters = [np.unique(adata.obs['leiden2'])[np.argsort(correlation_leiden2[i,:])[-5:]]
+                       for i in range(len(np.unique(adata.obs['leiden2'])))]
+        cells_to_module = torch.tensor([[l in correlated_clusters[i] for l in adata.obs['leiden2']]
+                                    for i in range(len(correlated_clusters))])
+        
         self.module = Cell2FateBaseModule(
             model=model_class,
             n_obs=self.summary_stats["n_cells"],
             n_vars=self.summary_stats["n_vars"],
             n_batch=self.summary_stats["n_batch"],
+            n_leiden1 = len(np.unique(adata.obs['leiden1'])),
+            n_leiden2 = len(np.unique(adata.obs['leiden2'])),
+            n_leiden3 = len(np.unique(adata.obs['leiden3'])),
+            n_leiden4 = len(np.unique(adata.obs['leiden4'])),
+            leiden1_cat = np.unique(adata.obs['leiden1'], return_inverse=True)[1],
+            leiden2_cat = np.unique(adata.obs['leiden2'], return_inverse=True)[1],
+            leiden3_cat = np.unique(adata.obs['leiden3'], return_inverse=True)[1],
+            leiden4_cat = np.unique(adata.obs['leiden4'], return_inverse=True)[1],
+            leiden1_to_leiden2 = [int(x[:1]) for x in np.array(np.unique(adata.obs['leiden2']))],
+            correlation_leiden1 = torch.corrcoef(torch.concat([torch.mean(torch.tensor(adata.X[adata.obs['leiden1'] == x,:]),
+                                                           axis = 0).unsqueeze(0) for x in np.unique(adata.obs['leiden1'])])),
+            cells_to_module = cells_to_module,
             **model_kwargs,
         )
         self._model_summary_string = f'Cell2fate Dynamical Model with the following params: \nn_batch: {self.summary_stats["n_batch"]} '
@@ -105,20 +124,70 @@ class Cell2fate_DynamicalModel_TimeMixture(QuantileMixin, PyroSampleMixin, PyroS
         %(param_batch_key)s
         %(param_labels_key)s
         """
+        
+        sc.pp.normalize_total(adata, target_sum=1e4)
+        sc.pp.log1p(adata)
+        sc.pp.scale(adata, max_value=10)
+        sc.tl.pca(adata, svd_solver='arpack')
+        sc.pp.neighbors(adata, n_neighbors=15, n_pcs=30)
+        sc.tl.leiden(adata, resolution = 1, key_added = 'leiden1')
+        unique_leiden1 = np.unique(adata.obs['leiden1'])
+
+        adata.obs['leiden2'] = 0
+        for i in range(len(unique_leiden1)):    
+            a_temp = sc.tl.leiden(adata[adata.obs['leiden1'] == unique_leiden1[i],:], copy = True, resolution = 0.33)
+            adata.obs['leiden2'][adata.obs['leiden1'] == unique_leiden1[i]] =  [str(i) + '_' + l for l in a_temp.obs['leiden']]
+        unique_leiden2 = np.unique(adata.obs['leiden2'])
+
+        adata.obs['leiden3'] = 0
+        for i in range(len(unique_leiden2)):
+            a_temp = sc.tl.leiden(adata[adata.obs['leiden2'] == unique_leiden2[i],:], copy = True, resolution = 0.5)
+            adata.obs['leiden3'][adata.obs['leiden2'] == unique_leiden2[i]] =  [str(i) + '_' + l for l in a_temp.obs['leiden']]
+        unique_leiden3 = np.unique(adata.obs['leiden3'])
+
+        adata.obs['leiden4'] = 0
+        for i in range(len(unique_leiden3)):
+            a_temp = sc.tl.leiden(adata[adata.obs['leiden3'] == unique_leiden3[i],:], copy = True, resolution = 0.75)
+            adata.obs['leiden4'][adata.obs['leiden3'] == unique_leiden3[i]] =  [str(i) + '_' + l for l in a_temp.obs['leiden']]
+        
+#         sc.pp.normalize_total(adata, target_sum=1e4)
+#         sc.pp.log1p(adata)
+#         sc.pp.scale(adata, max_value=10)
+#         sc.tl.pca(adata, svd_solver='arpack')
+#         sc.pp.neighbors(adata, n_neighbors=30, n_pcs=30)
+#         sc.tl.leiden(adata, resolution = 1, key_added = 'leiden1')
+#         unique_leiden1 = np.unique(adata.obs['leiden1'])
+#         correlation = torch.corrcoef(torch.concat([torch.mean(torch.tensor(adata.X[adata.obs['leiden1'] == x,:]),
+#                                                            axis = 0).unsqueeze(0) for x in np.unique(adata.obs['leiden1'])]))
+#         for i in range(len(unique_leiden1)):
+#             similar_clusters = unique_leiden1[correlation[:,i] > 0.8]
+#             if len(similar_clusters)> 1:
+#                 adata.obs['leiden1'][np.array([x in similar_clusters for x in adata.obs['leiden1']])] = unique_leiden1[i]
+#         adata.obs['leiden1'] = adata.obs['leiden1'].astype(int)
+#         unique_leiden1 = np.unique(adata.obs['leiden1'])
+#         adata.obs['leiden2'] = 0 
+#         for i in range(len(unique_leiden1)):
+#             a_temp = sc.tl.leiden(adata[adata.obs['leiden1'] == unique_leiden1[i],:], copy = True, resolution = 1)
+#             adata.obs['leiden2'][adata.obs['leiden1'] == unique_leiden1[i]] =  [str(i) + '_' + l for l in a_temp.obs['leiden']]
+#         unique_leiden2 = np.unique(adata.obs['leiden2'])
+#         adata.obs['leiden3'] = 0
+#         for i in range(len(unique_leiden2)):
+#             a_temp = sc.tl.leiden(adata[adata.obs['leiden2'] == unique_leiden2[i],:], copy = True, resolution = 1)
+#             adata.obs['leiden3'][adata.obs['leiden2'] == unique_leiden2[i]] =  [str(i) + '_' + l for l in a_temp.obs['leiden']]
+#         unique_leiden3 = np.unique(adata.obs['leiden3'])
+#         adata.obs['leiden4'] = 0
+#         for i in range(len(unique_leiden3)):
+#             a_temp = sc.tl.leiden(adata[adata.obs['leiden3'] == unique_leiden3[i],:], copy = True, resolution = 1)
+#             adata.obs['leiden4'][adata.obs['leiden3'] == unique_leiden3[i]] =  [str(i) + '_' + l for l in a_temp.obs['leiden']]
+        
         setup_method_args = cls._get_setup_method_args(**locals())
         adata.obs["_indices"] = np.arange(adata.n_obs).astype("int64")
-        if cluster_label:
-            anndata_fields = [
+        anndata_fields = [
                 LayerField('unspliced', unspliced_label, is_count_data=True),
                 LayerField('spliced', spliced_label, is_count_data=True),
-                CategoricalObsField('clusters', cluster_label),
-                NumericalObsField(REGISTRY_KEYS.INDICES_KEY, "_indices"),
-                CategoricalObsField(REGISTRY_KEYS.BATCH_KEY, batch_key)
-            ]
-        else:
-            anndata_fields = [
-                LayerField('unspliced', unspliced_label, is_count_data=True),
-                LayerField('spliced', spliced_label, is_count_data=True),
+                CategoricalObsField('leiden1', 'leiden1'),
+                CategoricalObsField('leiden2', 'leiden2'),
+                CategoricalObsField('leiden3', 'leiden3'),
                 CategoricalObsField(REGISTRY_KEYS.BATCH_KEY, batch_key),
                 NumericalObsField(REGISTRY_KEYS.INDICES_KEY, "_indices"),
             ]
@@ -197,7 +266,7 @@ class Cell2fate_DynamicalModel_TimeMixture(QuantileMixin, PyroSampleMixin, PyroS
             observed_total = torch.sum(torch.sum(torch.stack([torch.tensor(self.adata_manager.get_from_registry('unspliced')),
                           torch.tensor(self.adata_manager.get_from_registry('spliced'))], axis = -1), axis = -1), axis = -1)
         inferred_total = torch.sum(torch.sum(torch.tensor(self.samples['post_sample_means']['mu_expression']), axis = -1), axis = -1)
-        for m in range(self.module.model.n_modules):
+        for m in range(self.module.model.n_leiden2):
             mu_m = mu_mRNA_continousAlpha_globalTime_twoStates(
                 torch.tensor(self.samples['post_sample_means']['A_mgON'][m,:]),
                 torch.tensor(0.),
@@ -229,9 +298,9 @@ class Cell2fate_DynamicalModel_TimeMixture(QuantileMixin, PyroSampleMixin, PyroS
 
     def plot_module_summary_statistics(self, adata, save = None):
         'Weight, Activation, Velocity, Switch ON/OFF time (histogram)'
-        limit = np.max([np.sort(adata.obs['Module ' + str(i) + ' Activation'])[int(np.round(0.99*len(adata.obs['Module ' + str(i) + ' Activation'])))] for i in range(self.module.model.n_modules)])
-        fig, ax = plt.subplots(self.module.model.n_modules, 2, figsize = (10, 4*self.module.model.n_modules))
-        for i in range(self.module.model.n_modules):
+        limit = np.max([np.sort(adata.obs['Module ' + str(i) + ' Activation'])[int(np.round(0.99*len(adata.obs['Module ' + str(i) + ' Activation'])))] for i in range(self.module.model.n_leiden2)])
+        fig, ax = plt.subplots(self.module.model.n_leiden2, 2, figsize = (10, 4*self.module.model.n_leiden2))
+        for i in range(self.module.model.n_leiden2):
             sc.pl.umap(adata, color = ['Module ' + str(i) + ' Activation'], legend_loc = None,
                         size = 200, color_map = 'viridis', ax = ax[i,0], show = False, vmin = 0, vmax = limit)
             sc.pl.umap(adata, color = ['Module ' + str(i) + ' State'], legend_loc = 'on data',
@@ -369,7 +438,7 @@ class Cell2fate_DynamicalModel_TimeMixture(QuantileMixin, PyroSampleMixin, PyroS
         "Bergen et al. (2020), Generalizing RNA velocity to transient cell states through dynamical modeling"
         """
 
-        n_modules = self.module.model.n_modules
+        n_modules = self.module.model.n_leiden2
         fix, ax = plt.subplots(n_modules, 1, figsize = (6, n_modules*4))
         for m in range(n_modules):
             print('Computing velocity produced by Module ' + str(m) + ' ...')
@@ -459,8 +528,8 @@ class Cell2fate_DynamicalModel_TimeMixture(QuantileMixin, PyroSampleMixin, PyroS
             self.samples['post_sample_means']['mu_expression'][...,0] - \
             torch.tensor(self.samples['post_sample_means']['gamma_g']) * \
             self.samples['post_sample_means']['mu_expression'][...,1]
-            scv.pp.neighbors(adata)
-            scv.tl.velocity_graph(adata, vkey = 'velocity')
+            scv.pp.neighbors(adata)            
+            scv.tl.velocity_graph(adata, vkey = 'velocity')            
             scv.tl.velocity_embedding(adata, vkey = 'velocity')
 
             if plot:
@@ -477,7 +546,7 @@ class Cell2fate_DynamicalModel_TimeMixture(QuantileMixin, PyroSampleMixin, PyroS
 
     def compare_module_activation(self, adata, chosen_modules, time_max = None, time_min = 0,
                                  save = None, ncol = 1):
-        n_modules = self.module.model.n_modules
+        n_modules = self.module.model.n_leiden2
         fig, ax = plt.subplots(1, 1, figsize=(18, 5))
         for m in chosen_modules:
             T_c = torch.tensor(0.).unsqueeze(-1).unsqueeze(-1)
@@ -580,18 +649,18 @@ class Cell2fate_DynamicalModel_TimeMixture(QuantileMixin, PyroSampleMixin, PyroS
     def get_module_top_features(self, adata, background, species = 'Mouse', p_adj_cutoff = 0.01, n_top_genes = None):
         '''Returns dataframe with top Genes, TFs and GO terms of each module'''
         tab = pd.DataFrame(columns = ('Module Number', 'Genes Ranked', 'TFs Ranked', 'Terms Ranked'))
-        tab['Module Number'] = list(range(self.module.model.n_modules))
+        tab['Module Number'] = list(range(self.module.model.n_leiden2))
         if species == 'Human':
             TFs = np.array(pd.read_csv(c2f.__file__[:-11] + 'Human_TFs.txt', header=None, index_col=False)).flatten()
         elif species == 'Mouse':
             TFs = np.array(pd.read_csv(c2f.__file__[:-11] + 'Mouse_TFs.txt', header=None, index_col=False)).flatten()
         TFs = np.array([tf for tf in TFs if tf in adata.var_names])
-        gene_by_module_weight = torch.zeros((self.module.model.n_modules, self.module.model.n_vars))
-        gene_by_module_sorted = np.empty((self.module.model.n_modules, self.module.model.n_vars), dtype=object)
-        TF_by_module_sorted = np.empty((self.module.model.n_modules, len(TFs)), dtype=object)
+        gene_by_module_weight = torch.zeros((self.module.model.n_leiden2, self.module.model.n_vars))
+        gene_by_module_sorted = np.empty((self.module.model.n_leiden2, self.module.model.n_vars), dtype=object)
+        TF_by_module_sorted = np.empty((self.module.model.n_leiden2, len(TFs)), dtype=object)
         TF_boolean = np.array([g in TFs for g in adata.var_names])
         inferred_total = torch.sum(torch.tensor(self.samples['post_sample_means']['mu_expression'])[...,1], axis = 0)
-        for m in range(self.module.model.n_modules):
+        for m in range(self.module.model.n_leiden2):
             mu_m = mu_mRNA_continousAlpha_globalTime_twoStates(
                 torch.tensor(self.samples['post_sample_means']['A_mgON'][m,:]),
                 torch.tensor(0.),
@@ -610,11 +679,11 @@ class Cell2fate_DynamicalModel_TimeMixture(QuantileMixin, PyroSampleMixin, PyroS
 
         ### Select n_genes/n_modules top genes for each module
         ### Find enriched GO terms
-        n_modules = self.module.model.n_modules
+        n_leiden2 = self.module.model.n_leiden2
         results = []
         if not n_top_genes:
-            n_top_genes = int(self.module.model.n_vars/n_modules/2)
-        for m in range(n_modules):
+            n_top_genes = int(self.module.model.n_vars/n_leiden2/2)
+        for m in range(n_leiden2):
             gene_list = list(gene_by_module_sorted[m,:n_top_genes])
             if species == 'Mouse':
                 enr = gp.enrichr(gene_list=gene_list,

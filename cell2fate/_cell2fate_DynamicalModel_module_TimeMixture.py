@@ -30,8 +30,18 @@ class Cell2fate_DynamicalModel_module_TimeMixture(PyroModule):
         n_obs,
         n_vars,
         n_batch,
+        n_leiden1,
+        n_leiden2,
+        n_leiden3,
+        n_leiden4,
+        leiden1_cat,
+        leiden2_cat,
+        leiden3_cat,
+        leiden4_cat,
+        leiden1_to_leiden2,
+        correlation_leiden1,
+        cells_to_module,
         n_extra_categoricals=None,
-        n_modules = 10,
         stochastic_v_ag_hyp_prior={"alpha": 6.0, "beta": 3.0},
         factor_prior={"rate": 1.0, "alpha": 1.0, "states_per_gene": 3.0},
         t_switch_alpha_prior = {"mean": 1000., "alpha": 1000.},
@@ -39,7 +49,7 @@ class Cell2fate_DynamicalModel_module_TimeMixture(PyroModule):
                                 "mean_hyp_alpha": 10., "alpha_hyp_alpha": 20.},
         degredation_rate_hyp_prior={"mean": 1.0, "alpha": 5.0,
                                 "mean_hyp_alpha": 10., "alpha_hyp_alpha": 20.},
-        activation_rate_hyp_prior={"mean_hyp_prior_mean": 2., "mean_hyp_prior_sd": 0.33,
+        activation_rate_hyp_prior={"mean_hyp_prior_mean": 1., "mean_hyp_prior_sd": 0.33,
                                     "sd_hyp_prior_mean": 0.33, "sd_hyp_prior_sd": 0.1},
         s_overdispersion_factor_hyp_prior={'alpha_mean': 100., 'beta_mean': 1.,
                                            'alpha_sd': 1., 'beta_sd': 0.1},
@@ -48,7 +58,7 @@ class Cell2fate_DynamicalModel_module_TimeMixture(PyroModule):
         detection_gi_prior={"mean": 1, "alpha": 200},
         gene_add_alpha_hyp_prior={"alpha": 9.0, "beta": 3.0},
         gene_add_mean_hyp_prior={"alpha": 1.0, "beta": 100.0},
-        Tmax_prior={"mean": 50., "sd": 50.},
+        Tmax_prior={"mean": 500., "sd": 200.},
         switch_time_sd = 0.1,
         init_vals: Optional[dict] = None
     ):
@@ -68,13 +78,15 @@ class Cell2fate_DynamicalModel_module_TimeMixture(PyroModule):
 
         ############# Initialise parameters ################
         super().__init__()
-        self.n_modules = n_modules
         self.n_obs = n_obs
         self.n_vars = n_vars
         self.n_batch = n_batch
         self.n_extra_categoricals = n_extra_categoricals
         self.factor_prior = factor_prior
-        
+        self.n_leiden1 = n_leiden1
+        self.n_leiden2 = n_leiden2
+        self.n_leiden3 = n_leiden3 
+        self.n_leiden4 = n_leiden4
         self.stochastic_v_ag_hyp_prior = stochastic_v_ag_hyp_prior
         self.gene_add_alpha_hyp_prior = gene_add_alpha_hyp_prior
         self.gene_add_mean_hyp_prior = gene_add_mean_hyp_prior
@@ -92,17 +104,53 @@ class Cell2fate_DynamicalModel_module_TimeMixture(PyroModule):
                 if k == 'I_cm':
                     self.register_buffer(f"init_val_{k}", torch.tensor(init_vals[k], dtype = torch.long))
                 else:
-                    self.register_buffer(f"init_val_{k}", torch.tensor(init_vals[k]))
-         
+                    self.register_buffer(f"init_val_{k}", torch.tensor(init_vals[k])) 
+        
         self.register_buffer(
-            "n_modules_torch",
-            torch.tensor(n_modules, dtype = torch.float32),
+            "I_mc",
+            cells_to_module,
+        )         
+        
+        self.register_buffer(
+            "correlation_leiden1",
+            correlation_leiden1,
+        ) 
+        
+        self.register_buffer(
+            "leiden1_cat",
+            torch.tensor(leiden1_cat),
+        ) 
+        
+        self.register_buffer(
+            "leiden2_cat",
+            torch.tensor(leiden2_cat),
+        ) 
+            
+        self.register_buffer(
+            "leiden3_cat",
+            torch.tensor(leiden3_cat),
+        )
+        
+        self.register_buffer(
+            "leiden4_cat",
+            torch.tensor(leiden3_cat),
+        )
+        
+        self.register_buffer(
+            "n_leiden2_torch",
+            torch.tensor(n_leiden2, dtype = torch.float32),
+        )
+        
+        self.register_buffer(
+            "n_leiden1_torch",
+            torch.tensor(n_leiden1, dtype = torch.float32),
         )
         
         self.register_buffer(
             "s_overdispersion_factor_alpha_mean",
             torch.tensor(self.s_overdispersion_factor_hyp_prior["alpha_mean"]),
         )
+        
         self.register_buffer(
             "s_overdispersion_factor_beta_mean",
             torch.tensor(self.s_overdispersion_factor_hyp_prior["beta_mean"]),
@@ -213,7 +261,8 @@ class Cell2fate_DynamicalModel_module_TimeMixture(PyroModule):
         self.register_buffer("one_point_two", torch.tensor(1.2))
         self.register_buffer("zeros", torch.zeros(self.n_obs, self.n_vars))
         self.register_buffer("ones_g", torch.ones((1,self.n_vars,1)))
-        self.register_buffer("ones_m", torch.ones(n_modules))
+        
+        self.register_buffer("zeros_leiden1", torch.zeros(self.n_leiden1))
         
         # Register parameters for activation rate hyperprior:
         self.register_buffer(
@@ -279,8 +328,6 @@ class Cell2fate_DynamicalModel_module_TimeMixture(PyroModule):
             torch.tensor(self.factor_prior["alpha"] / self.factor_prior["rate"]),
         )
         
-        self.register_buffer("n_factors_torch", torch.tensor(self.n_modules))
-        
         self.register_buffer(
             "factor_states_per_gene",
             torch.tensor(self.factor_prior["states_per_gene"]),
@@ -289,17 +336,7 @@ class Cell2fate_DynamicalModel_module_TimeMixture(PyroModule):
         self.register_buffer(
             "t_c_init",
             self.one*torch.ones((self.n_obs, 1, 1))/2.,
-        )
-        
-        self.register_buffer(
-            "t_mON_init",
-            torch.ones((1, 1, self.n_modules))/2.,
-        )  
-        
-        self.register_buffer(
-            "t_mOFF_init",
-            torch.zeros((1, 1, self.n_modules)) + 0.1,
-        )      
+        ) 
         
         self.register_buffer(
             "probs_I_cm",
@@ -311,6 +348,10 @@ class Cell2fate_DynamicalModel_module_TimeMixture(PyroModule):
             torch.ones(2),
         )
         
+        self.register_buffer(
+            "leiden1_to_leiden2",
+            torch.tensor(leiden1_to_leiden2)
+        )     
             
     ############# Define the model ################
     @staticmethod
@@ -387,10 +428,10 @@ class Cell2fate_DynamicalModel_module_TimeMixture(PyroModule):
         g_fg = pyro.sample( # (g_fg corresponds to module's spliced counts in steady state)
             "g_fg",
             dist.Gamma(
-                self.factor_states_per_gene / self.n_factors_torch,
+                self.factor_states_per_gene / self.n_leiden1,
                 self.ones / factor_level_g,
             )
-            .expand([self.n_modules, self.n_vars])
+            .expand([self.n_leiden1, self.n_vars])
             .to_event(2)
         )
         A_mgON = pyro.deterministic('A_mgON', g_fg*gamma_g) # (transform from spliced counts to transcription rate)
@@ -401,39 +442,55 @@ class Cell2fate_DynamicalModel_module_TimeMixture(PyroModule):
         lam_sd = pyro.sample('lam_sd', dist.Gamma(G_a(self.activation_rate_sd_hyp_prior_mean, self.activation_rate_sd_hyp_prior_sd),
                                             G_b(self.activation_rate_sd_hyp_prior_mean, self.activation_rate_sd_hyp_prior_sd)))
         lam_m_mu = pyro.sample('lam_m_mu', dist.Gamma(G_a(lam_mu, lam_sd),
-                                            G_b(lam_mu, lam_sd)).expand([self.n_modules, 1, 1]).to_event(3))
+                                            G_b(lam_mu, lam_sd)).expand([self.n_leiden1, 1, 1]).to_event(3))
         lam_mi = pyro.sample('lam_mi', dist.Gamma(G_a(lam_m_mu, lam_m_mu*0.05),
-                                            G_b(lam_m_mu, lam_m_mu*0.05)).expand([self.n_modules, 1, 2]).to_event(3))
+                                       G_b(lam_m_mu, lam_m_mu*0.05)).expand([self.n_leiden1, 1, 2]).to_event(3))
         
         # =====================Time======================= #
-        # Global time for each cell:
-        mixture_weights = pyro.sample('mixture_weights', dist.Dirichlet(self.mixture_weights_prior))
-        T_max = pyro.sample('Tmax', dist.Gamma(G_a(self.Tmax_mean, self.Tmax_sd), G_b(self.Tmax_mean, self.Tmax_sd)))
-        t_c_loc = pyro.sample('t_c_loc', dist.Gamma(self.one, self.one/0.5).expand([1,1,2]).to_event(3))
-        t_c_scale = pyro.sample('t_c_scale', dist.Gamma(self.one, self.one/0.25).expand([1,1,2]).to_event(3))
-        with obs_plate:
-            cell_weights = pyro.sample('cell_weights',
-                                  dist.RelaxedOneHotCategorical(probs = mixture_weights, temperature = self.one/1000))
-            t_c = pyro.sample('t_c', dist.Normal(t_c_loc, t_c_scale))
-            T_c = pyro.deterministic('T_c', (torch.einsum('bik,bimk->bi', t_c, cell_weights) * T_max).unsqueeze(1))  
+        # Global time for each cell:      
+        Tmax = pyro.deterministic('Tmax', self.n_leiden1_torch*10.0)
+        sd_1 = pyro.sample('sd_1', dist.Exponential(1/(Tmax/6)))
+        covariance_1 = sd_1*self.correlation_leiden1
+#         T_level1 = pyro.sample('T_level1', dist.MultivariateNormal(self.zeros_leiden1, covariance_1))
+        T_level1 = pyro.sample('T_level1', dist.Normal(Tmax, sd_1).expand([self.n_leiden1]).to_event(1))
+        sd_2 = pyro.sample('sd_2', dist.Exponential(1/(sd_1/self.n_leiden2)))
+        T_level2 = pyro.sample('T_level2', dist.Normal(self.zero, sd_2).expand([self.n_leiden2]).to_event(1))
+        sd_3 = pyro.sample('sd_3', dist.Exponential(1/(sd_1/self.n_leiden3)))
+        T_level3 = pyro.sample('T_level3', dist.Normal(self.zero, sd_3).expand([self.n_leiden3]).to_event(1))
+        sd_4 = pyro.sample('sd_4', dist.Exponential(1/(sd_1/self.n_leiden4)))
+        T_level4 = pyro.sample('T_level4', dist.Normal(self.zero, sd_4).expand([self.n_leiden4]).to_event(1))
+        sd_5 = pyro.sample('sd_5', dist.Exponential(1/(sd_1/self.n_obs)))
+        with obs_plate as indx:
+            T_levelF = pyro.sample('T_levelF', dist.Normal(self.zero, sd_5))
+            one_hot_1 = one_hot(self.leiden1_cat[indx].unsqueeze(-1), self.n_leiden1)
+            one_hot_2 = one_hot(self.leiden2_cat[indx].unsqueeze(-1), self.n_leiden2)
+            one_hot_3 = one_hot(self.leiden3_cat[indx].unsqueeze(-1), self.n_leiden3)
+            one_hot_4 = one_hot(self.leiden4_cat[indx].unsqueeze(-1), self.n_leiden4)
+            T_c = pyro.deterministic('T_c', (torch.einsum('ci,i->c', one_hot_1, T_level1).unsqueeze(-1).unsqueeze(-1)
+                                             + torch.einsum('ci,i->c', one_hot_2, T_level2).unsqueeze(-1).unsqueeze(-1)
+                                             + torch.einsum('ci,i->c', one_hot_3, T_level3).unsqueeze(-1).unsqueeze(-1) 
+                                             + torch.einsum('ci,i->c', one_hot_4, T_level4).unsqueeze(-1).unsqueeze(-1) 
+                                             + T_levelF))
+
+        # Global switch on time for each module:        
+        T_mON = pyro.deterministic('T_mON', T_level1.unsqueeze(0).unsqueeze(0)-sd_2)
         
-#         print(cell_weights.shape)
-#         print(t_c.shape)
-                      
-        # Global switch on time for each module:
-        t_delta = pyro.sample('t_delta', dist.Gamma(self.one*20, self.one * 20 *self.n_modules_torch).
-                              expand([self.n_modules]).to_event(1))
-        t_mON = torch.cumsum(torch.concat([self.zero.unsqueeze(0), t_delta[:-1]]), dim = 0).unsqueeze(0).unsqueeze(0)
-        T_mON = pyro.deterministic('T_mON', T_max*t_mON)
         # Global switch off time for each module:
-        t_mOFF = pyro.sample('t_mOFF', dist.Exponential(self.n_modules_torch).expand([1, 1, self.n_modules]).to_event(2))
-        T_mOFF = pyro.deterministic('T_mOFF', T_mON + T_max*t_mOFF)
+        t_mOFF = pyro.sample('t_mOFF', dist.Exponential(1/(4*sd_2)).expand([1, 1, self.n_leiden1]).to_event(2))
+        T_mOFF = pyro.deterministic('T_mOFF', T_mON + t_mOFF)
         
         # =========== Mean expression according to RNAvelocity model ======================= #
         mu_total = torch.stack([self.zeros[idx,...], self.zeros[idx,...]], axis = -1)
-        for m in range(self.n_modules):
-            mu_total += mu_mRNA_continousAlpha_globalTime_twoStates(
-                A_mgON[m,:], A_mgOFF, beta_g, gamma_g, lam_mi[m,...], T_c[:,:,0], T_mON[:,:,m], T_mOFF[:,:,m], self.zeros[idx,...])
+#         for m in range(self.n_leiden2):
+#             subset = self.I_mc[m,idx]
+#             mu_total[subset,...] += mu_mRNA_continousAlpha_globalTime_twoStates(
+#                 A_mgON[m,:], A_mgOFF, beta_g, gamma_g, lam_mi[m,...], T_c[subset,:,0],
+#                 T_mON[:,:,m], T_mOFF[:,:,m], self.zeros[idx,...][subset,...])
+        for m in range(self.n_leiden1):
+                mu_total += mu_mRNA_continousAlpha_globalTime_twoStates(
+                    A_mgON[m,:], A_mgOFF, beta_g, gamma_g, lam_mi[m,...], T_c[:,:,0],
+                    T_mON[:,:,m], T_mOFF[:,:,m], self.zeros[idx,...])
+
         with obs_plate:
             mu_expression = pyro.deterministic('mu_expression', mu_total)
         
