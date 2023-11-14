@@ -11,9 +11,6 @@ from torch.distributions import biject_to, transform_to
 from ._cell2fate_DynamicalModel import \
 Cell2fate_DynamicalModel
 
-from ._cell2fate_DynamicalModel_ModuleSpecificTime_NonGaussianTimePrior import \
-Cell2fate_DynamicalModel_ModuleSpecificTime_NonGaussianTimePrior
-
 from ._cell2fate_DynamicalModel_PriorKnowledge import \
 Cell2fate_DynamicalModel_PriorKnowledge
 
