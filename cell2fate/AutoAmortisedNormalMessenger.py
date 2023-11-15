@@ -13,7 +13,6 @@ from pyro.infer.autoguide.utils import (
     helpful_support_errors,
 )
 from pyro.nn.module import PyroModule, PyroParam, to_pyro_module_
-from scvi._compat import Literal
 from torch.distributions import biject_to, constraints
 
 from cell2fate.nn import FCLayers
@@ -118,7 +117,7 @@ class AutoAmortisedHierarchicalNormalMessenger(AutoHierarchicalNormalMessenger):
         encoder_kwargs=None,
         multi_encoder_kwargs=None,
         encoder_instance: torch.nn.Module = None,
-        encoder_mode: Literal["single", "multiple", "single-multiple"] = "single",
+        encoder_mode = "single",
         hierarchical_sites: Optional[list] = None,
     ):
         if not isinstance(init_scale, float) or not (init_scale > 0):

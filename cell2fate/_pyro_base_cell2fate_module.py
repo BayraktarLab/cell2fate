@@ -1,4 +1,3 @@
-from scvi._compat import Literal
 from scvi.module.base import PyroBaseModuleClass
 from pyro.infer.autoguide import AutoNormal, AutoHierarchicalNormalMessenger
 
@@ -9,7 +8,7 @@ class Cell2FateBaseModule(PyroBaseModuleClass, AutoGuideMixinModule):
         self,
         model,
         amortised: bool = False,
-        encoder_mode: Literal["single", "multiple", "single-multiple"] = "single",
+        encoder_mode = "single",
         encoder_kwargs=None,
         data_transform="log1p",
         **kwargs,
