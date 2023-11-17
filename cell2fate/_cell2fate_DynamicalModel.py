@@ -72,13 +72,10 @@ class Cell2fate_DynamicalModel(QuantileMixin, PyroSampleMixin, PyroSviTrainMixin
 
         if model_class is None:
             model_class = Cell2fate_DynamicalModel_module
-        print(len(adata.obs))
         self.module = Cell2FateBaseModule(
             model=model_class,
             n_obs=self.summary_stats["n_cells"],
             n_vars=self.summary_stats["n_vars"],
-            #n_obs = len(adata.obs),
-            #n_vars = self.summary_stats["n_spliced"],
             n_batch=self.summary_stats["n_batch"],
             **model_kwargs,
         )
