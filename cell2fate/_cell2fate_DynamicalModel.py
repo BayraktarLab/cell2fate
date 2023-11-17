@@ -122,9 +122,7 @@ class Cell2fate_DynamicalModel(QuantileMixin, PyroSampleMixin, PyroSviTrainMixin
                 NumericalObsField(REGISTRY_KEYS.INDICES_KEY, "_indices"),
             ]
         adata_manager = AnnDataManager(fields=anndata_fields, setup_method_args=setup_method_args)
-        print(kwargs)
         adata_manager.register_fields(adata, **kwargs)
-        adata_manager.view_registry()
         cls.register_manager(adata_manager)
 
     def train(
