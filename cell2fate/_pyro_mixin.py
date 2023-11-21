@@ -27,7 +27,27 @@ from cell2fate.AutoAmortisedNormalMessenger import (
 )
 
 logger = logging.getLogger(__name__)
-
+       
+import sys
+from pyro.infer.autoguide.utils import deep_getattr, deep_setattr, helpful_support_errors
+from torch.distributions import biject_to, constraints
+import pyro.distributions as dist
+from pyro.poutine.util import site_is_subsample
+from pyro.nn.module import PyroModule, PyroParam, pyro_method
+from pyro.infer.autoguide import AutoHierarchicalNormalMessenger
+from pyro.poutine.runtime import get_plates
+from pyro.distributions.distribution import Distribution
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Optional,
+    Type,
+    Union,
+    ValuesView,
+)
 
 def init_to_value(site=None, values={}):
     if site is None:
@@ -1134,3 +1154,128 @@ class PyroAggressiveTrainingPlan(PyroAggressiveTrainingPlan1):
                 optim=self.optim,
                 loss=self.loss_fn,
             )
+
+class MyAutoHierarchicalNormalMessenger(AutoHierarchicalNormalMessenger):
+   
+
+    @pyro_method
+    def __call__(self, *args, **kwargs):
+        # Since this guide creates parameters lazily, we need to avoid batching
+        # those parameters by a particle plate, in case the first time this
+        # guide is called is inside a particle plate. We assume all plates
+        # outside the model are particle plates.
+        self._outer_plates = tuple(f.name for f in get_plates())
+            
+        try: 
+            if self._computing_quantiles==False:
+                self._computing_quantiles=False
+        except:
+            self._computing_quantiles=False
+
+        try:
+            return self.call_new(*args, **kwargs)
+        finally:
+            del self._outer_plates
+
+
+    def call_new(self, *args, **kwargs) -> Dict[str, torch.Tensor]:  # type: ignore[override]
+        """
+        Draws posterior samples from the guide and replays the model against
+        those samples.
+
+        :returns: A dict mapping sample site name to sample value.
+            This includes latent, deterministic, and observed values.
+        :rtype: dict
+        """
+        self.args_kwargs = args, kwargs
+        try:
+            with self:
+                self.model(*args, **kwargs)
+        finally:
+            del self.args_kwargs
+        model_trace, guide_trace = self.get_traces()
+
+        if self._computing_quantiles:
+            with poutine.block():
+                model = poutine.condition(self.model, self.quantile_dict)
+                trace = poutine.trace(model).get_trace(*args, **kwargs)
+                samples = {
+                 name: site["value"]
+                 for name, site in trace.nodes.items()
+                 if site["type"] == "sample"
+                 if not site_is_subsample(site)
+                 }
+
+            #samples = self.quantile_dict
+            #print(samples.keys())
+
+            
+            return samples
+
+        else:
+            samples = {
+                name: site["value"]
+                for name, site in model_trace.nodes.items()
+                if site["type"] == "sample"
+            }
+
+        return samples
+
+    
+    def _pyro_sample(self, msg):
+            
+
+        if msg["is_observed"] or site_is_subsample(msg):
+            return
+        prior = msg["fn"]
+        msg["infer"]["prior"] = prior
+        posterior = self.get_posterior(msg["name"], prior)
+        if isinstance(posterior, torch.Tensor):
+            posterior = dist.Delta(posterior, event_dim=prior.event_dim)
+        if posterior.batch_shape != prior.batch_shape:
+            posterior = posterior.expand(prior.batch_shape)
+        
+        if self._computing_quantiles==True:
+            quantiles = self.get_posterior_quantile(msg["name"], prior)
+        msg["fn"] = posterior
+
+    def get_posterior_quantile(
+        self,
+        name: str,
+        prior: Distribution,
+    ) -> Union[Distribution, torch.Tensor]:
+        if self._computing_median:
+            return self._get_posterior_median(name, prior)
+        if self._computing_quantiles:
+            return self._get_posterior_quantiles(name, prior)
+        return self.get_posterior_quantile(name, prior)
+    
+    
+    
+    def quantiles(self, quantiles, *args, **kwargs):
+        self._computing_quantiles = True
+        self._quantile_values = quantiles
+        try:
+            return self(*args, **kwargs)
+        finally:
+            print("test")
+
+    @torch.no_grad()
+    def _get_posterior_quantiles(self, name, prior):
+        transform = biject_to(prior.support)
+        if (self._hierarchical_sites is None) or (name in self._hierarchical_sites):
+            loc, scale, weight = self._get_params(name, prior)
+            loc = loc + transform.inv(prior.mean) * weight
+        else:
+            loc, scale = self._get_params(name, prior)
+
+        site_quantiles = torch.tensor(self._quantile_values, dtype=loc.dtype, device=loc.device)
+        site_quantiles_values = dist.Normal(loc, scale).icdf(site_quantiles)
+        try:
+            if self.quantile_dict=={}:
+                self.quantile_dict={}
+        except:
+            self.quantile_dict={}            
+        
+        self.quantile_dict[name]=transform(site_quantiles_values)
+        return transform(site_quantiles_values)

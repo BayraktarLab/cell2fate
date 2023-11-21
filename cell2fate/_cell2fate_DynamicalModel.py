@@ -345,7 +345,6 @@ class Cell2fate_DynamicalModel(QuantileMixin, PyroSampleMixin, PyroSviTrainMixin
         full_velocity_posterior = False,
         normalize = True):
         
-        
         if batch_size == None:
             batch_size = adata.n_obs
 
