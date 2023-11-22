@@ -1279,3 +1279,63 @@ class MyAutoHierarchicalNormalMessenger(AutoHierarchicalNormalMessenger):
         
         self.quantile_dict[name]=transform(site_quantiles_values)
         return transform(site_quantiles_values)
+
+from scvi.module.base import PyroBaseModuleClass
+from scvi.train import PyroTrainingPlan
+from typing import Optional, Union
+import pyro
+
+max_epochs = 4000
+start_lr = 0.01
+final_lr = 0.001
+lrd = (final_lr/start_lr)**(1/max_epochs)
+clipped_adam = pyro.optim.ClippedAdam({"lr": start_lr, "lrd": lrd,  "clip_norm": 10.0})
+
+class PyroTrainingPlan_ClippedAdamDecayingRate(PyroTrainingPlan):
+    """
+    Lightning module task to train Pyro scvi-tools modules.
+    Parameters
+    ----------
+    pyro_module
+        An instance of :class:`~scvi.module.base.PyroBaseModuleClass`. This object
+        should have callable `model` and `guide` attributes or methods.
+    loss_fn
+        A Pyro loss. Should be a subclass of :class:`~pyro.infer.ELBO`.
+        If `None`, defaults to :class:`~pyro.infer.Trace_ELBO`.
+    optim
+        A Pyro optimizer instance, e.g., :class:`~pyro.optim.Adam`. If `None`,
+        defaults to :class:`pyro.optim.Adam` optimizer with a learning rate of `1e-3`.
+    optim_kwargs
+        Keyword arguments for **default** optimiser :class:`pyro.optim.Adam`.
+    n_aggressive_epochs
+        Number of epochs in aggressive optimisation of amortised variables.
+    n_aggressive_steps
+        Number of steps to spend optimising amortised variables before one step optimising global variables.
+    n_steps_kl_warmup
+        Number of training steps (minibatches) to scale weight on KL divergences from 0 to 1.
+        Only activated when `n_epochs_kl_warmup` is set to None.
+    n_epochs_kl_warmup
+        Number of epochs to scale weight on KL divergences from 0 to 1.
+        Overrides `n_steps_kl_warmup` when both are not `None`.
+    """
+
+    def __init__(
+        self,
+        pyro_module: PyroBaseModuleClass,
+        loss_fn: Optional[pyro.infer.ELBO] = None,
+        optim: Optional[pyro.optim.PyroOptim] = clipped_adam,
+        optim_kwargs: Optional[dict] = None,
+    ):
+        super().__init__(
+            pyro_module=pyro_module,
+            loss_fn=loss_fn,
+            optim=optim,
+            optim_kwargs=optim_kwargs
+        )
+
+        self.svi = pyro.infer.SVI(
+            model=pyro_module.model,
+            guide=pyro_module.guide,
+            optim=self.optim,
+            loss=self.loss_fn,
+        )
