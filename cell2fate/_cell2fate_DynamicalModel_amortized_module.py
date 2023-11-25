@@ -13,7 +13,7 @@ from pyro.infer import config_enumerate
 from pyro.ops.indexing import Vindex
 from torch.distributions import constraints
 
-class Cell2fate_DynamicalModel_ModuleSpecificTime_NonGaussianTimePrior_module(PyroModule):
+class Cell2fate_DynamicalModel_amortized_module(PyroModule):
     r"""
     - Models spliced and unspliced counts for each gene as a dynamical process in which transcriptional modules switch on
     at one point in time and increase the transcription rate by different values across genes and then optionally switches off
@@ -28,7 +28,6 @@ class Cell2fate_DynamicalModel_ModuleSpecificTime_NonGaussianTimePrior_module(Py
     def __init__(
         self,
         n_obs,
-        n_vars,
         n_batch,
         n_extra_categoricals=None,
         n_modules = 10,
@@ -214,7 +213,6 @@ class Cell2fate_DynamicalModel_ModuleSpecificTime_NonGaussianTimePrior_module(Py
         self.register_buffer("zeros", torch.zeros(self.n_obs, self.n_vars))
         self.register_buffer("ones_g", torch.ones((1,self.n_vars,1)))
         self.register_buffer("ones_m", torch.ones(n_modules))
-        self.register_buffer("zeros_m", torch.zeros(1,1, self.n_modules))
         
         # Register parameters for activation rate hyperprior:
         self.register_buffer(
@@ -340,13 +338,15 @@ class Cell2fate_DynamicalModel_ModuleSpecificTime_NonGaussianTimePrior_module(Py
         indexes of model args to provide to encoder,
         variable names that belong to the observation plate
         and the number of dimensions in non-plate axis of each variable"""
-
+        
+        def gene_transform(x):
+                return torch.log1p(x)
+        
         return {
             "name": "obs_plate",
-            "input": [],  # expression data + (optional) batch index
-            "input_transform": [],  # how to transform input data before passing to NN
-            "sites": {},
-        }
+            "input": [0],
+            "input_transform": [gene_transform],
+            "sites": {"t_c": 1}}
     
     def forward(self, u_data, s_data, idx, batch_index):
         
@@ -402,18 +402,27 @@ class Cell2fate_DynamicalModel_ModuleSpecificTime_NonGaussianTimePrior_module(Py
         
         # =====================Time======================= #
         # Global time for each cell:
+        T_max = pyro.sample('Tmax', dist.Gamma(G_a(self.Tmax_mean, self.Tmax_sd), G_b(self.Tmax_mean, self.Tmax_sd)))
+        t_c_loc = pyro.sample('t_c_loc', dist.Gamma(self.one, self.one/0.5))
+        t_c_scale = pyro.sample('t_c_scale', dist.Gamma(self.one, self.one/0.25))
         with obs_plate:
-            T_cm = pyro.sample('T_cm', dist.Exponential(1/self.Tmax_mean).expand([batch_size, 1, self.n_modules]))
+            t_c = pyro.sample('t_c', dist.Normal(t_c_loc, t_c_scale).expand([batch_size, 1, 1]))
+            T_c = pyro.deterministic('T_c', t_c*T_max)
         # Global switch on time for each gene:
-        T_mON = pyro.deterministic('T_mON', self.zeros_m)
+#         t_mON = pyro.sample('t_mON', dist.Uniform(self.zero, self.one).expand([1, 1, self.n_modules]).to_event(2))
+        t_delta = pyro.sample('t_delta', dist.Gamma(self.one*20, self.one * 20 *self.n_modules_torch).
+                              expand([self.n_modules]).to_event(1))
+        t_mON = torch.cumsum(torch.concat([self.zero.unsqueeze(0), t_delta[:-1]]), dim = 0).unsqueeze(0).unsqueeze(0)
+        T_mON = pyro.deterministic('T_mON', T_max*t_mON)
         # Global switch off time for each gene:
-        T_mOFF = pyro.sample('T_mOFF', dist.Exponential(1/self.Tmax_mean).expand([1, 1, self.n_modules]).to_event(2))
+        t_mOFF = pyro.sample('t_mOFF', dist.Exponential(self.n_modules_torch).expand([1, 1, self.n_modules]).to_event(2))
+        T_mOFF = pyro.deterministic('T_mOFF', T_mON + T_max*t_mOFF)
         
         # =========== Mean expression according to RNAvelocity model ======================= #
         mu_total = torch.stack([self.zeros[idx,...], self.zeros[idx,...]], axis = -1)
         for m in range(self.n_modules):
             mu_total += mu_mRNA_continousAlpha_globalTime_twoStates(
-                A_mgON[m,:], A_mgOFF, beta_g, gamma_g, lam_mi[m,...], T_cm[:,:,m], T_mON[...,m], T_mOFF[:,:,m], self.zeros[idx,...])
+                A_mgON[m,:], A_mgOFF, beta_g, gamma_g, lam_mi[m,...], T_c[:,:,0], T_mON[:,:,m], T_mOFF[:,:,m], self.zeros[idx,...])
         with obs_plate:
             mu_expression = pyro.deterministic('mu_expression', mu_total)
         

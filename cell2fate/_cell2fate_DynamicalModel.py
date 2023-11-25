@@ -75,8 +75,8 @@ class Cell2fate_DynamicalModel(QuantileMixin, PyroSampleMixin, PyroSviTrainMixin
             
         self.module = Cell2FateBaseModule(
             model=model_class,
-            n_obs=self.summary_stats["n_cells"],
-            n_vars=self.summary_stats["n_vars"],
+            n_obs=len(adata.obs_names),
+            n_vars=len(adata.var_names),
             n_batch=self.summary_stats["n_batch"],
             **model_kwargs,
         )
