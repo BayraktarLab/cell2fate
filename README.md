@@ -1,5 +1,3 @@
-### cell2fate
-
 ![alt text](https://github.com/BayraktarLab/cell2fate/blob/main/cell2fate_diagram.png?raw=true)
 
 ## Usage and Tutorials
