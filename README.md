@@ -2,8 +2,8 @@
 
 ## Usage and Tutorials
 
-The standard recommended workflow for using cell2fate can be found in this this tutorial [here](https://github.com/BayraktarLab/cell2fate/blob/main/notebooks/cell2fate_PancreasWithCC.ipynb).
-For further notebooks and examples including more datasets and integration with cell2location we have more notebooks [here](https://github.com/BayraktarLab/cell2fate/blob/main/notebooks/)
+The standard recommended workflow for using cell2fate can be found in this this tutorial [here](https://github.com/BayraktarLab/cell2fate/blob/main/notebooks/publication_figures/cell2fate_PancreasWithCC.ipynb).
+For further notebooks and examples including more datasets and integration with cell2location we have more notebooks [here](https://github.com/BayraktarLab/cell2fate/blob/main/notebooks/publication_figures/)
 
 ## Installation
 
