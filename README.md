@@ -1,5 +1,7 @@
 ### cell2fate
 
+![alt text](https://github.com/BayraktarLab/cell2fate/cell2fate_diagram.jpg?raw=true)
+
 ## Usage and Tutorials
 
 The standard recommended workflow for using cell2fate can be found in this this tutorial [here](https://github.com/BayraktarLab/cell2fate/blob/main/notebooks/publication_figures/cell2fate_PancreasWithCC.ipynb).
