@@ -14,6 +14,9 @@ Cell2fate_DynamicalModel
 from ._cell2fate_DynamicalModel_PriorKnowledge import \
 Cell2fate_DynamicalModel_PriorKnowledge
 
+from ._cell2fate_DynamicalModel_PriorKnowledge_Sequential import \
+Cell2fate_DynamicalModel_PriorKnowledge_Sequential
+
 from ._cell2fate_DynamicalModel_amortized import \
 Cell2fate_DynamicalModel_amortized
 

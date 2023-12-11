@@ -336,7 +336,6 @@ class Cell2fate_DynamicalModel(QuantileMixin, PyroSampleMixin, PyroSviTrainMixin
 
         return adata
 
-
     def export_posterior_quantiles(
         self,
         adata,
