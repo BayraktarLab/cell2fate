@@ -3,7 +3,15 @@
 ## Usage and Tutorials
 
 The standard recommended workflow for using cell2fate can be found in this this tutorial [here](https://github.com/BayraktarLab/cell2fate/blob/main/notebooks/publication_figures/cell2fate_PancreasWithCC.ipynb).
-For further notebooks and examples including more datasets and integration with cell2location we have more notebooks [here](https://github.com/BayraktarLab/cell2fate/blob/main/notebooks/publication_figures/)
+
+To use the cell2fate + cell2location workflow: <br />
+1.) Run cell2fate and save modules, as shown in [this notebook](https://github.com/BayraktarLab/cell2fate/blob/main/notebooks/publication_figures/cell2fate_HumanDevelopingBrain.ipynb). <br />
+2.) Install cell2location, as explained [here](https://github.com/BayraktarLab/cell2location). <br />
+3.) Run cell2location, with the cell2fate modules as input, as shown in [this notebook](https://github.com/BayraktarLab/cell2fate/blob/main/notebooks/publication_figures/cell2location_HumanDevelopingBrain.ipynb). <br />
+
+## Publication figures
+
+Results from all datasets in the [cell2fate preprint](https://www.biorxiv.org/content/10.1101/2023.08.03.551650v1.full.pdf) can be reproduced with [these noteobooks](https://github.com/BayraktarLab/cell2fate/blob/main/notebooks/publication_figures/).
 
 ## Installation
 
