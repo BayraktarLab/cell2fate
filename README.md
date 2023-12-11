@@ -1,6 +1,6 @@
 ### cell2fate
 
-![alt text](https://github.com/BayraktarLab/cell2fate/cell2fate_diagram.jpg?raw=true)
+![alt text](https://github.com/BayraktarLab/cell2fate/cell2fate_diagram.png?raw=true)
 
 ## Usage and Tutorials
 
