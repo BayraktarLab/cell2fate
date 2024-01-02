@@ -974,9 +974,7 @@ class Cell2fate_DynamicalModel_PriorKnowledge(QuantileMixin, PyroSampleMixin, Py
         self.samples['post_sample_means'] = quantiles_dict["0.5"]
         adata.obs['Time (hours)'] = self.samples['post_sample_means']['T_c'].flatten() - np.min(self.samples['post_sample_means']['T_c'].flatten())
         
-
         adata.obs['Time Uncertainty (QCD)'] = (quantiles_dict['0.75']['T_c'].flatten() - quantiles_dict['0.25']['T_c'].flatten())/ (quantiles_dict['0.25']['T_c'].flatten() + quantiles_dict['0.75']['T_c'].flatten())
-        
         
         adata.layers['spliced mean'] = self.samples['post_sample_means']['mu_expression'][...,1]
         adata.layers['velocity'] = torch.tensor(self.samples['post_sample_means']['beta_g']) * \

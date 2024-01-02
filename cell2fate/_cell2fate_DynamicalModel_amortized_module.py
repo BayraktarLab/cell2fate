@@ -28,6 +28,7 @@ class Cell2fate_DynamicalModel_amortized_module(PyroModule):
     def __init__(
         self,
         n_obs,
+        n_vars,
         n_batch,
         n_extra_categoricals=None,
         n_modules = 10,
@@ -310,18 +311,20 @@ class Cell2fate_DynamicalModel_amortized_module(PyroModule):
     def _get_fn_args_from_batch_no_cat(tensor_dict):
         u_data = tensor_dict['unspliced']
         s_data = tensor_dict['spliced']
+        x_data = torch.stack([u_data, s_data], axis = 2)
         ind_x = tensor_dict["ind_x"].long().squeeze()
         batch_index = tensor_dict[REGISTRY_KEYS.BATCH_KEY]
-        return (u_data, s_data, ind_x, batch_index), {}
+        return (x_data, ind_x, batch_index), {}
 
     @staticmethod
     def _get_fn_args_from_batch_cat(tensor_dict):
         u_data = tensor_dict['unspliced']
         s_data = tensor_dict['spliced']
+        x_data = torch.stack([u_data, s_data], axis = 2)
         ind_x = tensor_dict["ind_x"].long().squeeze()
         batch_index = tensor_dict[REGISTRY_KEYS.BATCH_KEY]
         extra_categoricals = tensor_dict[REGISTRY_KEYS.CAT_COVS_KEY]
-        return (u_data, s_data, ind_x, batch_index), {}
+        return (x_data, ind_x, batch_index), {}
 
     @property
     def _get_fn_args_from_batch(self):
@@ -330,7 +333,7 @@ class Cell2fate_DynamicalModel_amortized_module(PyroModule):
         else:
             return self._get_fn_args_from_batch_no_cat
 
-    def create_plates(self, u_data, s_data, idx, batch_index):
+    def create_plates(self, x_data, idx, batch_index):
         return pyro.plate("obs_plate", size=self.n_obs, dim=-3, subsample=idx)
 
     def list_obs_plate_vars(self):
@@ -340,19 +343,23 @@ class Cell2fate_DynamicalModel_amortized_module(PyroModule):
         and the number of dimensions in non-plate axis of each variable"""
         
         def gene_transform(x):
-                return torch.log1p(x)
+                return torch.log1p(x.flatten(start_dim = -2))
+        def no_transform(x):
+                return(x)
         
         return {
+            "n_in": 2*self.n_vars,
             "name": "obs_plate",
-            "input": [0],
-            "input_transform": [gene_transform],
-            "sites": {"t_c": 1}}
+            "input": [0,2],
+            "input_transform": [gene_transform, no_transform],
+            "sites": {"t_c": (1,1),
+                     "detection_y_c": (1,1)}}
     
-    def forward(self, u_data, s_data, idx, batch_index):
+    def forward(self, x_data, idx, batch_index):
         
         batch_size = len(idx)
         obs2sample = one_hot(batch_index, self.n_batch)        
-        obs_plate = self.create_plates(u_data, s_data, idx, batch_index)
+        obs_plate = self.create_plates(x_data, idx, batch_index)
         
         # ===================== Kinetic Rates ======================= #
         # Splicing rate:
@@ -523,4 +530,4 @@ class Cell2fate_DynamicalModel_amortized_module(PyroModule):
         # Likelihood (sampling distribution) of data_target & add overdispersion via NegativeBinomial
         with obs_plate:
             pyro.sample("data_target", dist.GammaPoisson(concentration= stochastic_v_ag,
-                       rate= stochastic_v_ag / mu), obs=torch.stack([u_data, s_data], axis = 2))
+                       rate= stochastic_v_ag / mu), obs=x_data)

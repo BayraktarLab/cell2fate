@@ -39,7 +39,6 @@ class Cell2FateBaseModule(PyroBaseModuleClass, AutoGuideMixinModule):
             model=self.model,
             amortised=self.is_amortised,
             encoder_kwargs=encoder_kwargs,
-            data_transform=data_transform,
             encoder_mode=encoder_mode,
             init_loc_fn=self.init_to_value,
             guide_class=guide_class,

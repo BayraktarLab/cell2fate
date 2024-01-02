@@ -417,13 +417,13 @@ class Cell2fate_DynamicalModel_PriorKnowledge_module(PyroModule):
             t_c = pyro.sample('t_c', dist.Normal(self.t_c_loc[indx], t_c_scale).expand([batch_size, 1, 1]))
             T_c = pyro.deterministic('T_c', t_c*T_max)
         # Global switch on time for each gene:
-        t_delta = pyro.sample('t_delta', dist.Gamma(self.one*20, self.one * 20 *self.n_modules_torch).
-                              expand([self.n_modules]).to_event(1))
-        t_mON = torch.cumsum(torch.concat([self.zero.unsqueeze(0), t_delta[:-1]]), dim = 0).unsqueeze(0).unsqueeze(0)
-        T_mON = pyro.deterministic('T_mON', T_max*t_mON)
+        t_delta = pyro.sample('t_kdelta', dist.Gamma(self.one*20, self.one * 20 *self.n_modules_torch).
+                              expand([self.n_lineages, self.n_modules]).to_event(1))
+        t_kmON = torch.cumsum(torch.concat([self.zero.unsqueeze(0).unsqueeze(0), t_delta[:-1]]), dim = 0).unsqueeze(0).unsqueeze(0)
+        T_kmON = pyro.deterministic('T_kmON', T_max*t_mON)
         # Global switch off time for each gene:
-        t_mOFF = pyro.sample('t_mOFF', dist.Exponential(self.n_modules_torch).expand([1, 1, self.n_modules]).to_event(2))
-        T_mOFF = pyro.deterministic('T_mOFF', T_mON + T_max*t_mOFF)
+        t_kmOFF = pyro.sample('t_kmOFF', dist.Exponential(self.n_modules_torch).expand([self.n_lineages, 1, 1, self.n_modules]).to_event(2))
+        T_kmOFF = pyro.deterministic('T_kmOFF', T_mON + T_max*t_mOFF)
         
         # =========== Mean expression according to RNAvelocity model ======================= #
         mu_total = torch.stack([self.zeros[idx,...], self.zeros[idx,...]], axis = -1)

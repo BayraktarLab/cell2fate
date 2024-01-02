@@ -130,6 +130,113 @@ def _complete_full_tensors_using_plates(
     return means_global
 
 
+# class AutoGuideMixinModule:
+#     """
+#     This mixin class provides methods for:
+
+#     - initialising standard AutoNormal guides
+#     - initialising amortised guides (AutoNormalEncoder)
+#     - initialising amortised guides with special additional inputs
+
+#     """
+
+#     def _create_autoguide(
+#         self,
+#         model,
+#         amortised,
+#         encoder_kwargs,
+#         data_transform,
+#         encoder_mode,
+#         init_loc_fn=init_to_mean(fallback=init_to_feasible),
+#         n_cat_list: list = [],
+#         encoder_instance=None,
+#         guide_class=AutoNormal,
+#         guide_kwargs: Optional[dict] = None,
+#     ):
+
+#         if guide_kwargs is None:
+#             guide_kwargs = dict()
+#         if not amortised:
+#             if getattr(model, "discrete_variables", None) is not None:
+#                 model = poutine.block(model, hide=model.discrete_variables)
+#             if issubclass(guide_class, poutine.messenger.Messenger):
+#                 # messenger guides don't need create_plates function
+#                 _guide = guide_class(
+#                     model,
+#                     init_loc_fn=init_loc_fn,
+#                     **guide_kwargs,
+#                 )
+#             else:
+#                 _guide = guide_class(
+#                     model,
+#                     init_loc_fn=init_loc_fn,
+#                     **guide_kwargs,
+#                     create_plates=self.model.create_plates,
+#                 )
+#         else:
+#             encoder_kwargs = encoder_kwargs if isinstance(encoder_kwargs, dict) else dict()
+#             n_hidden = encoder_kwargs["n_hidden"] if "n_hidden" in encoder_kwargs.keys() else 200
+#             if isinstance(data_transform, np.ndarray):
+#                 # add extra info about gene clusters as input to NN
+#                 self.register_buffer("gene_clusters", torch.tensor(data_transform.astype("float32")))
+#                 n_in = model.n_vars + data_transform.shape[1]
+#                 data_transform = self._data_transform_clusters()
+#             elif data_transform == "log1p":
+#                 # use simple log1p transform
+#                 data_transform = torch.log1p
+#                 n_in = self.model.n_vars
+#             elif (
+#                 isinstance(data_transform, dict)
+#                 and "var_std" in list(data_transform.keys())
+#                 and "var_mean" in list(data_transform.keys())
+#             ):
+#                 # use data transform by scaling
+#                 n_in = model.n_vars
+#                 self.register_buffer(
+#                     "var_mean",
+#                     torch.tensor(data_transform["var_mean"].astype("float32").reshape((1, n_in))),
+#                 )
+#                 self.register_buffer(
+#                     "var_std",
+#                     torch.tensor(data_transform["var_std"].astype("float32").reshape((1, n_in))),
+#                 )
+#                 data_transform = self._data_transform_scale()
+#             else:
+#                 # use custom data transform
+#                 data_transform = data_transform
+#                 n_in = model.n_vars
+#             amortised_vars = model.list_obs_plate_vars()
+#             if len(amortised_vars["input"]) >= 2:
+#                 encoder_kwargs["n_cat_list"] = n_cat_list
+#             amortised_vars["input_transform"][0] = data_transform
+#             if getattr(model, "discrete_variables", None) is not None:
+#                 model = poutine.block(model, hide=model.discrete_variables)
+#             _guide = AutoAmortisedHierarchicalNormalMessenger(
+#                 model,
+#                 amortised_plate_sites=amortised_vars,
+#                 n_in=n_in,
+#                 n_hidden=n_hidden,
+#                 encoder_kwargs=encoder_kwargs,
+#                 encoder_mode=encoder_mode,
+#                 encoder_instance=encoder_instance,
+#                 **guide_kwargs,
+#             )
+#         return _guide
+
+#     def _data_transform_clusters(self):
+#         def _data_transform(x):
+#             return torch.log1p(torch.cat([x, x @ self.gene_clusters], dim=1))
+
+#         return _data_transform
+
+#     def _data_transform_scale(self):
+#         def _data_transform(x):
+#             # return (x - self.var_mean) / self.var_std
+#             return x / self.var_std
+
+#         return _data_transform
+
+
 class AutoGuideMixinModule:
     """
     This mixin class provides methods for:
@@ -145,7 +252,6 @@ class AutoGuideMixinModule:
         model,
         amortised,
         encoder_kwargs,
-        data_transform,
         encoder_mode,
         init_loc_fn=init_to_mean(fallback=init_to_feasible),
         n_cat_list: list = [],
@@ -153,9 +259,9 @@ class AutoGuideMixinModule:
         guide_class=AutoNormal,
         guide_kwargs: Optional[dict] = None,
     ):
-
         if guide_kwargs is None:
             guide_kwargs = dict()
+
         if not amortised:
             if getattr(model, "discrete_variables", None) is not None:
                 model = poutine.block(model, hide=model.discrete_variables)
@@ -176,39 +282,10 @@ class AutoGuideMixinModule:
         else:
             encoder_kwargs = encoder_kwargs if isinstance(encoder_kwargs, dict) else dict()
             n_hidden = encoder_kwargs["n_hidden"] if "n_hidden" in encoder_kwargs.keys() else 200
-            if isinstance(data_transform, np.ndarray):
-                # add extra info about gene clusters as input to NN
-                self.register_buffer("gene_clusters", torch.tensor(data_transform.astype("float32")))
-                n_in = model.n_vars + data_transform.shape[1]
-                data_transform = self._data_transform_clusters()
-            elif data_transform == "log1p":
-                # use simple log1p transform
-                data_transform = torch.log1p
-                n_in = self.model.n_vars
-            elif (
-                isinstance(data_transform, dict)
-                and "var_std" in list(data_transform.keys())
-                and "var_mean" in list(data_transform.keys())
-            ):
-                # use data transform by scaling
-                n_in = model.n_vars
-                self.register_buffer(
-                    "var_mean",
-                    torch.tensor(data_transform["var_mean"].astype("float32").reshape((1, n_in))),
-                )
-                self.register_buffer(
-                    "var_std",
-                    torch.tensor(data_transform["var_std"].astype("float32").reshape((1, n_in))),
-                )
-                data_transform = self._data_transform_scale()
-            else:
-                # use custom data transform
-                data_transform = data_transform
-                n_in = model.n_vars
             amortised_vars = model.list_obs_plate_vars()
             if len(amortised_vars["input"]) >= 2:
                 encoder_kwargs["n_cat_list"] = n_cat_list
-            amortised_vars["input_transform"][0] = data_transform
+            n_in = amortised_vars["n_in"]
             if getattr(model, "discrete_variables", None) is not None:
                 model = poutine.block(model, hide=model.discrete_variables)
             _guide = AutoAmortisedHierarchicalNormalMessenger(
@@ -219,23 +296,10 @@ class AutoGuideMixinModule:
                 encoder_kwargs=encoder_kwargs,
                 encoder_mode=encoder_mode,
                 encoder_instance=encoder_instance,
+                init_loc_fn=init_loc_fn,
                 **guide_kwargs,
             )
         return _guide
-
-    def _data_transform_clusters(self):
-        def _data_transform(x):
-            return torch.log1p(torch.cat([x, x @ self.gene_clusters], dim=1))
-
-        return _data_transform
-
-    def _data_transform_scale(self):
-        def _data_transform(x):
-            # return (x - self.var_mean) / self.var_std
-            return x / self.var_std
-
-        return _data_transform
-
 
 class QuantileMixin:
     """

@@ -74,6 +74,19 @@ class Cell2fate_DynamicalModel_amortized(QuantileMixin, PyroSampleMixin, PyroSvi
             model_class = Cell2fate_DynamicalModel_amortized_module
             
         self.module = Cell2FateBaseModule(
+            amortised = True,
+            encoder_kwargs={
+            "dropout_rate": 0.1,
+            "n_hidden": {
+                "single": model_kwargs['n_modules'],
+                "t_c": 2,
+                "detection_y_c": 3,
+            },
+            "use_batch_norm": False,
+            "use_layer_norm": True,
+            "n_layers": 1,
+            "activation_fn": torch.nn.ELU,
+            },
             model=model_class,
             n_obs=self.summary_stats["n_cells"],
             n_vars=self.summary_stats["n_vars"],
