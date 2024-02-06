@@ -1,3 +1,4 @@
 sphinx_rtd_theme
 nbsphinx
 myst_parser
+git+https://github.com/BayraktarLab/cell2fate
