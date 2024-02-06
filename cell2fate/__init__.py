@@ -20,8 +20,8 @@ Cell2fate_DynamicalModel_PriorKnowledge_Sequential
 from ._cell2fate_DynamicalModel_amortized import \
 Cell2fate_DynamicalModel_amortized
 
-from ._cell2fate_DynamicalModel_TerminalStates import \
-Cell2fate_DynamicalModel_TerminalStates
+#from ._cell2fate_DynamicalModel_TerminalStates import \
+#Cell2fate_DynamicalModel_TerminalStates
 
 # from ._cell2fate_DynamicalModel_ModuleSpecificTime import \
 # Cell2fate_DynamicalModel_ModuleSpecificTime
