@@ -17,8 +17,8 @@ jaxlib==0.4.10
 leidenalg==0.10.1
 einops
 gseapy
-git+https://github.com/BayraktarLab/cell2fate.git
-sphinx==5.1.1 
+git+https://github.com/sezginerr/cell2fate.git
+sphinx==7.2.6 
 sphinx_rtd_theme
 nbsphinx
 
