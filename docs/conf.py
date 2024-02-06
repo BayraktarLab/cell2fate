@@ -13,11 +13,6 @@
 import os
 import sys
 
-os.chdir("..")
-
-os.system("pip install -e .")
-
-os.chdir("./docs")
 # -- Project information -----------------------------------------------------
 
 project = "cell2fate"
