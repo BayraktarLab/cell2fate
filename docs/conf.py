@@ -13,8 +13,11 @@
 import os
 import sys
 
-sys.path.insert(0, os.path.abspath(os.path.join("..", "..")))
+os.chdir("..")
 
+os.system("pip install -e .")
+
+os.chdir("./docs")
 # -- Project information -----------------------------------------------------
 
 project = "cell2fate"
