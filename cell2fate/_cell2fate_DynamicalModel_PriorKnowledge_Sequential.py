@@ -32,7 +32,7 @@ from scvelo.plotting.velocity_embedding_grid import compute_velocity_on_grid
 from ._velocity_embedding_stream import velocity_embedding_stream_modules
 import scipy
 import gseapy as gp
-from cell2fate._pyro_base_cell2fate_module_AutoNormalGuide import Cell2FateBaseModule
+from cell2fate._pyro_base_cell2fate_module import Cell2FateBaseModule
 from cell2fate._pyro_mixin import PltExportMixin, QuantileMixin
 from ._cell2fate_DynamicalModel_PriorKnowledge_Sequential_module3 import \
 Cell2fate_DynamicalModel_PriorKnowledge_Sequential_module
