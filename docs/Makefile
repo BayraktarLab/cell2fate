@@ -17,11 +17,6 @@ help:
 
 .PHONY: help Makefile download-notebooks
 
-# New target to downloadnotebooks
-download-notebooks:
-	@echo "Downloading Jupyter notebooks..."
-	@$(PYTHON) download_notebooks.py
-
 # Modified catch-all target: now includes download-notebooks as a dependency
 %: Makefile download-notebooks 
 	@$(SPHINXBUILD) -M $@ "$(SOURCEDIR)" "$(BUILDDIR)" $(SPHINXOPTS) $(O)
