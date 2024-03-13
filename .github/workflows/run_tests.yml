@@ -2,10 +2,11 @@ name: Run tests
 
 
 on:
+  workflow_dispatch:
   push:
-    branches: [master]
+    branches: [main]
   pull_request:
-    branches: [master]
+    branches: [main]
   schedule:
     - cron: '0 0 * * MON'
 
