@@ -19,6 +19,26 @@ import cell2fate as c2f
 import torch
 
 def robust_optimization(mod, save_dir, max_epochs = [200, 400], lr = [0.01, 0.01]):
+    """
+    Perform robust optimization of the model.
+
+    Parameters
+    ----------
+    mod
+        Model to optimize.
+    save_dir
+        The directory to save the optimized model.
+    max_epochs
+        List of maximum epochs for the first and second optimization runs. Default is [200, 400].
+    lr
+        List of learning rates for the first and second optimization runs. Default is [0.01, 0.01].
+
+    Returns
+    -------
+    PyroBaseModuleClass
+        The optimized model.
+    """
+    
     n_modules = mod.module.model.n_modules
     adata = mod.adata
     print('First optimization run.')
@@ -93,6 +113,19 @@ def robust_optimization(mod, save_dir, max_epochs = [200, 400], lr = [0.01, 0.01
         return mod1 
 
 def get_max_modules(adata):
+    """
+    Lightning module task to train Pyro scvi-tools modules.
+
+    Parameters
+    ----------
+    adata
+        AnnData object containing single-cell RNA sequencing data.
+
+    Returns
+    -------
+    Int
+        The maximal number of modules determined through Leiden clustering.
+    """
     print('Leiden clustering ...')
     adata_copy = adata.copy()
     adata_copy.X = adata_copy.layers['unspliced'] + adata_copy.layers['spliced']
@@ -145,8 +178,8 @@ def compute_velocity_graph_Bergen2020(adata, n_neighbours = None, full_posterior
     Parameters
     ----------
     adata
-        anndata object with velocity information in adata.layers['velocity'] (expectation value) or 
-        adata.uns['velocity_posterior'] (full posterior). Also normalized spliced counts in adata.layers['spliced_norm'].
+        anndata object with velocity information in ``adata.layers['velocity']`` (expectation value) or 
+        ``adata.uns['velocity_posterior']`` (full posterior). Also normalized spliced counts in adata.layers['spliced_norm'].
     n_neighbours
         how many nearest neighbours to consider (all non nearest neighbours have edge weights set to 0)
         if not specified, 10% of the total number of cells is used.
@@ -154,7 +187,8 @@ def compute_velocity_graph_Bergen2020(adata, n_neighbours = None, full_posterior
         whether to use full posterior to compute velocity graph (otherwise expectation value is used)  
     Returns
     -------
-    velocity_graph
+    Array
+        Velocity graph
     """
     M = len(adata.obs_names)
     if not n_neighbours:
@@ -196,20 +230,16 @@ def plot_velocity_umap_Bergen2020(adata, use_full_posterior = True, n_neighbours
     The method computes a "velocity graph" before plotting (see the referenced paper for details),
     unless such a graph is already available. The graph is based on the full velocity posterior distribution if available,
     otherwise it is based on the velocity expectation values.
-    Velocity is expected in adata.layers['velocity'] or adata.uns['velocity_posterior'] (for the full posterior)
-    and the graph is saved/expected in adata.layers['velocity_graph'].
+    Velocity is expected in ``adata.layers['velocity']`` or ``adata.uns['velocity_posterior']`` (for the full posterior)
+    and the graph is saved/expected in ``adata.layers['velocity_graph']``.
     
     Parameters
     ----------
     adata
-        anndata object with velocity information
+        AnnData object with velocity information
     use_full_posterior
-        use full posterior to compute velocity graph (if available)
-    plotting_kwargs
-        
-    Returns
-    -------
-    UMAP plot with RNAvelocity arrows.
+        Use full posterior to compute velocity graph (if available)
+    plotting_kwargs        
     """
     if 'velocity_graph' in adata.uns.keys():
         print('Using existing velocity graph')
@@ -245,22 +275,23 @@ def get_training_data(adata, remove_clusters = None, cells_per_cluster = 100,
     Parameters
     ----------
     adata
-        anndata
+        AnnData Object
     remove_clusters
-        names of clusters to be removed
+        Names of clusters to be removed
     cells_per_cluster
-        how many cells to keep per cluster. For Louvain clustering with resolution = 1, keeping more than 300 cells
+        How many cells to keep per cluster. For Louvain clustering with resolution = 1, keeping more than 300 cells
         per cluster does not provide much extra information.
     cluster_column
-        name of the column in adata.obs that contains cluster names
+        Name of the column in ``adata.obs`` that contains cluster names
     min_shared_counts
-        minimum number of spliced+unspliced counts across all cells for a gene to be retained
+        Minimum number of spliced+unspliced counts across all cells for a gene to be retained
     n_var_genes
-        number of top variable genes to retain
+        Number of top variable genes to retain
         
     Returns
     -------
-    adata object reduced to the most informative cells and genes
+    AnnData
+        AnnData object reduced to the most informative cells and genes
     """
     random.seed(a=1)
     adata = adata[[c not in remove_clusters for c in adata.obs[cluster_column]], :]
@@ -287,22 +318,96 @@ def get_training_data(adata, remove_clusters = None, cells_per_cluster = 100,
     return adata
 
 def G_a(mu, sd):
-    # Converts mean and sd for Gamma distribution into parameter
+    """
+    Converts mean and standard deviation for a Gamma distribution into the shape parameter.
+
+    Parameters
+    ----------
+    mu
+        The mean of the Gamma distribution.
+    sd
+        The standard deviation of the Gamma distribution.
+
+    Returns
+    -------
+    Float
+        The shape parameter of the Gamma distribution.
+    """
     return mu**2/sd**2
 
 def G_b(mu, sd):
-    # Converts mean and sd for Gamma distribution into beta parameter
+    """
+    Converts mean and standard deviation for a Gamma distribution into the scale parameter.
+
+    Parameters
+    ----------
+    mu
+        The mean of the Gamma distribution.
+    sd
+        The standard deviation of the Gamma distribution.
+
+    Returns
+    -------
+    Float
+        The scale parameter of the Gamma distribution.
+    """
+    
     return mu/sd**2
 
 def mu_alpha(alpha_new, alpha_old, tau, lam):
-    '''Calculates transcription rate as a function of new target transcription rate,
-    old transcription rate at changepoint, time since change point and rate of exponential change process'''
+    '''
+    Calculates transcription rate as a function of new target transcription rate,
+    old transcription rate at changepoint, time since changepoint, and rate of exponential change process.
+
+    Parameters
+    ----------
+    alpha_new
+        The new target transcription rate.
+    alpha_old
+        The old transcription rate at the changepoint.
+    tau
+        Time since the changepoint.
+    lam
+        Rate of the exponential change process.
+
+    Returns
+    -------
+    Float
+        The calculated transcription rate.
+    '''
+
     return (alpha_new - alpha_old) * (1 - torch.exp(-lam*tau)) + alpha_old
 
 def mu_mRNA_continuousAlpha(alpha, beta, gamma, tau, u0, s0, delta_alpha, lam):
-    ''' Calculates expected value of spliced and unspliced counts as a function of rates, latent time, initial states,
-    difference to transcription rate in previous state and rate of exponential change process between states.'''
-    
+    '''
+    Calculates the expected value of spliced and unspliced counts as a function of rates, latent time, initial states,
+    difference to transcription rate in the previous state, and rate of exponential change process between states.
+
+    Parameters
+    ----------
+    alpha
+        Transcription rate.
+    beta
+        Splicing rate.
+    gamma
+        Degradation rate.
+    tau
+        Latent time.
+    u0
+        Initial unspliced count.
+    s0
+        Initial spliced count.
+    delta_alpha
+        Difference to transcription rate in the previous state.
+    lam
+        Rate of exponential change process between states.
+
+    Returns
+    -------
+    Torch.Tensor
+        A tensor containing the expected value of unspliced and spliced counts.
+    '''
+
     mu_u = u0*torch.exp(-beta*tau) + (alpha/beta)* (1 - torch.exp(-beta*tau)) + delta_alpha/(beta-lam+10**(-5))*(torch.exp(-beta*tau) - torch.exp(-lam*tau))
     mu_s = (s0*torch.exp(-gamma*tau) + 
     alpha/gamma * (1 - torch.exp(-gamma*tau)) +
@@ -313,8 +418,37 @@ def mu_mRNA_continuousAlpha(alpha, beta, gamma, tau, u0, s0, delta_alpha, lam):
     return torch.stack([mu_u, mu_s], axis = -1)
 
 def mu_mRNA_continousAlpha_globalTime_twoStates(alpha_ON, alpha_OFF, beta, gamma, lam_gi, T_c, T_gON, T_gOFF, Zeros):
-    '''Calculates expected value of spliced and unspliced counts as a function of rates,
-    global latent time, initial states and global switch times between two states'''
+    '''
+    Calculates the expected value of spliced and unspliced counts as a function of rates,
+    global latent time, initial states, and global switch times between two states.
+
+    Parameters
+    ----------
+    alpha_ON
+        Transcription rate when the gene is turned ON.
+    alpha_OFF
+        Transcription rate when the gene is turned OFF.
+    beta
+        Splicing rate.
+    gamma
+        Degradation rate.
+    lam_gi
+        Parameters for the rate of exponential change process between states.
+    T_c
+        Global latent time.
+    T_gON
+        Global switch time when the gene is turned ON.
+    T_gOFF
+        Global switch time when the gene is turned OFF.
+    Zeros
+        Tensor with zeros used for initialization.
+
+    Returns
+    -------
+    Torch.Tensor
+        The expected value of unspliced and spliced counts.
+    '''
+    
     n_cells = T_c.shape[-2]
     n_genes = alpha_ON.shape[-1]
     tau = torch.clip(T_c - T_gON, min = 10**(-5))

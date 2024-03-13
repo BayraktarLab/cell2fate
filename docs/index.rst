@@ -1,4 +1,4 @@
-.. cell2fate documentation master file, created by
+ .. cell2fate documentation master file, created by
    sphinx-quickstart on Wed Feb 4 13:32:19 2024.
    You can adapt this file completely to your liking, but it should at least
    contain the root `toctree` directive.
@@ -76,4 +76,3 @@ See other notebooks to reproduce publication figures.
    cell2fate.plotting
    cell2fate.general_utils
    cell2fate.pyro_infrastructure
-   

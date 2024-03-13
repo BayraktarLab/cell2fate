@@ -15,14 +15,27 @@ from torch.distributions import constraints
 
 class Cell2fate_DynamicalModel_module(PyroModule):
     r"""
-    - Models spliced and unspliced counts for each gene as a dynamical process in which transcriptional modules switch on
-    at one point in time and increase the transcription rate by different values across genes and then optionally switches off
-    to a transcription rate of 0. Splicing and degredation rates are constant for each gene. 
-    - The underlying equations are similar to
-    "Bergen et al. (2020), Generalizing RNA velocity to transient cell states through dynamical modeling"
-    - In addition, the model includes negative binomial noise, batch effects and technical variables, similar to:
-    "Kleshchevnikov et al. (2022), Cell2location maps fine-grained cell types in spatial transcriptomics".
-    Although in the final version of this model technical variables will be modelled seperately for spliced and unspliced counts.
+    Models spliced and unspliced counts for each gene as a dynamical process in which transcriptional modules switch on at one point in time and increase the transcription rate by different values across genes and then optionally switches off to a transcription rate of 0. Splicing and degradation rates are constant for each gene. The underlying equations are similar to: "Bergen et al. (2020), Generalizing RNA velocity to transient cell states through dynamical modeling"
+    
+    .. note::
+        The model includes negative binomial noise, batch effects, and technical variables, similar to: "Kleshchevnikov et al. (2022), Cell2location maps fine-grained cell types in spatial transcriptomics". Although in the final version of this model technical variables will be modelled separately for spliced and unspliced counts.
+
+    Parameters
+    ----------
+    n_obs
+        Number of observations in the dataset (e.g., number of cells or samples).
+    n_vars
+        Number of variables or features in the dataset (e.g., number of genes).
+    n_batch
+        Number of batches or experimental conditions in the dataset.
+    n_extra_categoricals
+        Number of additional categorical variables beyond the primary variables of interest.
+    gene_add_alpha_hyp_prior
+        Hyperparameter prior for the gene additive parameter.
+    gene_add_mean_hyp_prior
+        Hyperparameter prior for the mean of the gene additive parameter distribution.
+    detection_hyp_prior
+        Hyperparameter prior for the detection process.
     """
 
     def __init__(
@@ -53,18 +66,7 @@ class Cell2fate_DynamicalModel_module(PyroModule):
         init_vals: Optional[dict] = None
     ):
         
-        """
 
-        Parameters
-        ----------
-        n_obs
-        n_vars
-        n_batch
-        n_extra_categoricals
-        gene_add_alpha_hyp_prior
-        gene_add_mean_hyp_prior
-        detection_hyp_prior
-        """
 
         ############# Initialise parameters ################
         super().__init__()
@@ -332,13 +334,46 @@ class Cell2fate_DynamicalModel_module(PyroModule):
             return self._get_fn_args_from_batch_no_cat
 
     def create_plates(self, u_data, s_data, idx, batch_index):
+        """
+        Creates a Pyro plate for observations.
+
+        Parameters
+        ----------
+        u_data
+            Unspliced count data.
+        s_data
+            Spliced count data.
+        idx
+            Index tensor to subsample.
+        batch_index 
+            Index tensor indicating batch assignments.
+
+        Returns
+        -------
+        Pyro.plate
+            A Pyro plate representing the observations in the dataset.
+        """
+            
         return pyro.plate("obs_plate", size=self.n_obs, dim=-3, subsample=idx)
 
     def list_obs_plate_vars(self):
-        """Create a dictionary with the name of observation/minibatch plate,
-        indexes of model args to provide to encoder,
-        variable names that belong to the observation plate
-        and the number of dimensions in non-plate axis of each variable"""
+        """
+        Creates a dictionary with the name of observation/minibatch plate, indexes of model args to provide to encoder, variable names that belong to the observation plate and the number of dimensions in non-plate axis of each variable.
+        
+        Returns
+        -------
+        Dict
+            A dictionary containing the following keys:
+            
+            - **name:** Name of the observation plate.
+            
+            - **input:** List of indexes of model arguments to provide to the encoder.
+            
+            - **input_transform:** List of transformations to apply to input data before passing to the neural network.
+            
+            - **sites:** Dictionary containing information about variables that belong to the observation plate, including their names and the number of dimensions in the non-plate axis of each variable.
+
+        """
 
         return {
             "name": "obs_plate",
@@ -348,6 +383,21 @@ class Cell2fate_DynamicalModel_module(PyroModule):
         }
     
     def forward(self, u_data, s_data, idx, batch_index):
+        
+        """
+        Forward pass of the :class:`~cell2fate.Cell2fate_DynamicalModel_module`.
+
+        Parameters
+        ----------
+        u_data
+            Unspliced count data.
+        s_data
+            Spliced count data.
+        idx
+            Index tensor to subsample.
+        batch_index
+            Index tensor indicating batch assignments.
+        """
         
         batch_size = len(idx)
         obs2sample = one_hot(batch_index, self.n_batch)        
