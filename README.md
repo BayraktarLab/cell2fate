@@ -1,3 +1,5 @@
+[![Run tests](https://github.com/sezginerr/cell2fate/actions/workflows/run_tests.yml/badge.svg)](https://github.com/sezginerr/cell2fate/actions/workflows/run_tests.yml)
+
 ![alt text](https://github.com/BayraktarLab/cell2fate/blob/main/cell2fate_diagram.png?raw=true)
 
 ## Usage and Tutorials
