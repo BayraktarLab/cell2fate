@@ -1,4 +1,4 @@
-name: Run tests
+name: Lint code and run tests
 
 
 on:
