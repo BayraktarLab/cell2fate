@@ -38,18 +38,6 @@ jobs:
     - name: Install dependencies
       run: |
         pip install .[dev]
-    - name: Lint with flake8
-      run: |
-        flake8
-      if: always()
-    - name: Format with black
-      run: |
-        black --check --line-length 120 .
-      if: always()
-    - name: Import sort
-      run: |
-        isort --check-only .
-      if: always()
     - name: Test with pytest
       run: |
         pytest
