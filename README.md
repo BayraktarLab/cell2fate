@@ -1,7 +1,5 @@
 [![Run tests](https://github.com/sezginerr/cell2fate/actions/workflows/run_tests.yml/badge.svg)](https://github.com/sezginerr/cell2fate/actions/workflows/run_tests.yml)
 
-[![codecov](https://codecov.io/gh/sezginerr/cell2fate/graph/badge.svg?token=7Z80AX75SQ)](https://codecov.io/gh/sezginerr/cell2fate)
-
 ![alt text](https://github.com/BayraktarLab/cell2fate/blob/main/cell2fate_diagram.png?raw=true)
 
 ## Usage and Tutorials
