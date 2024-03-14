@@ -39,7 +39,7 @@ jobs:
       run: |
         pip install .[dev]
     - name: Run tests and collect coverage
-      run: pytest --cov app ${{ env.CODECOV_ATS_TESTS }}
+      run: pytest --cov=. --cov-report=xml --cov-append
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v4.0.1
       with:
