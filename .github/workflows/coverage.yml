@@ -1,4 +1,4 @@
-name: Run tests
+name: Codecov coverage
 
 on:
   workflow_dispatch:
@@ -40,10 +40,11 @@ jobs:
     - name: Run tests and collect coverage
       run: pytest --cov=. --cov-report=xml --cov-append
     - name: Upload coverage to Codecov
-      uses: codecov/codecov-action@v4-beta
+      uses: codecov/codecov-action@v4.0.1
       with:
         flags: test-coverage
         file: ./coverage.xml
         verbose: true
+        slug: sezginerr/cell2fate
       env:
         CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
