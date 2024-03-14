@@ -44,6 +44,7 @@ jobs:
       uses: codecov/codecov-action@v4.0.1
       with:
         flags: smart-tests
+        file: ./coverage.xml
         verbose: true
       env:
         CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
