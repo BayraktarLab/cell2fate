@@ -49,7 +49,35 @@ from typing import (
     ValuesView,
 )
 
+from scvi.module.base import PyroBaseModuleClass
+from scvi.train import PyroTrainingPlan
+from typing import Optional, Union
+import pyro
+
+max_epochs = 4000
+start_lr = 0.01
+final_lr = 0.001
+lrd = (final_lr/start_lr)**(1/max_epochs)
+clipped_adam = pyro.optim.ClippedAdam({"lr": start_lr, "lrd": lrd,  "clip_norm": 10.0})
+
 def init_to_value(site=None, values={}):
+    '''
+    Initializes the value of a site to a specified value.
+
+    Parameters
+    ----------
+    site
+        The site dictionary containing information about the site. If `None`, returns a partial function.
+    values
+        A dictionary containing the values to initialize sites with.
+
+    Returns
+    -------
+    Function or any
+        If `site` is None, returns a partial function with the `values` preset. Otherwise, returns the value specified for the site in `values`, or initializes to the mean using `init_to_mean` with `fallback` set to `init_to_feasible` if the site is not in `values`.
+    '''
+
+    
     if site is None:
         return partial(init_to_value, values=values)
     if site["name"] in values:
@@ -59,12 +87,51 @@ def init_to_value(site=None, values={}):
 
 
 def expand_zeros_along_dim(tensor, size, dim):
+    '''
+    Expands a tensor with zeros along a specified dimension.
+
+    Parameters
+    ----------
+    tensor
+        The input tensor.
+    size
+        The size to expand along the specified dimension.
+    dim
+        The dimension along which to expand the tensor.
+
+    Returns
+    -------
+    Numpy.ndarray
+        A new tensor with zeros expanded along the specified dimension.
+    '''
     shape = np.array(tensor.shape)
     shape[dim] = size
     return np.zeros(shape)
 
 
 def complete_tensor_along_dim(tensor, indices, dim, value, mode="put"):
+    
+    '''
+    Completes a tensor along a specified dimension with given indices and values.
+
+    Parameters
+    ----------
+    tensor
+        The input tensor.
+    indices
+        The indices to complete along the specified dimension.
+    dim
+        The dimension along which to complete the tensor.
+    value
+        The values to insert into the tensor.
+    mode
+        The mode of completion. "put" for putting values, "take" for taking values. Default is "put".
+
+    Returns
+    -------
+    Numpy.ndarray
+        A new tensor with completed values along the specified dimension.
+    '''
     shape = value.shape
     shape = np.ones(len(shape))
     shape[dim] = len(indices)
@@ -79,6 +146,30 @@ def complete_tensor_along_dim(tensor, indices, dim, value, mode="put"):
 def _complete_full_tensors_using_plates(
     means_global, means, plate_dict, obs_plate_sites, plate_indices, plate_dim
 ):
+    '''
+    Completes full-sized tensors with minibatch values given minibatch indices.
+
+    Parameters
+    ----------
+    means_global
+        Dictionary containing global means.
+    means
+        Dictionary containing means.
+    plate_dict
+        Dictionary containing plate information.
+    obs_plate_sites
+        Dictionary containing observed plate sites.
+    plate_indices
+        Dictionary containing plate indices.
+    plate_dim
+        Dictionary containing plate dimensions.
+
+    Returns
+    -------
+    Dict
+        A dictionary with completed global means.
+    '''
+    
     # complete full sized tensors with minibatch values given minibatch indices
     for k in means_global.keys():
         # find which and how many plates contain this tensor
@@ -129,112 +220,6 @@ def _complete_full_tensors_using_plates(
             )
     return means_global
 
-
-# class AutoGuideMixinModule:
-#     """
-#     This mixin class provides methods for:
-
-#     - initialising standard AutoNormal guides
-#     - initialising amortised guides (AutoNormalEncoder)
-#     - initialising amortised guides with special additional inputs
-
-#     """
-
-#     def _create_autoguide(
-#         self,
-#         model,
-#         amortised,
-#         encoder_kwargs,
-#         data_transform,
-#         encoder_mode,
-#         init_loc_fn=init_to_mean(fallback=init_to_feasible),
-#         n_cat_list: list = [],
-#         encoder_instance=None,
-#         guide_class=AutoNormal,
-#         guide_kwargs: Optional[dict] = None,
-#     ):
-
-#         if guide_kwargs is None:
-#             guide_kwargs = dict()
-#         if not amortised:
-#             if getattr(model, "discrete_variables", None) is not None:
-#                 model = poutine.block(model, hide=model.discrete_variables)
-#             if issubclass(guide_class, poutine.messenger.Messenger):
-#                 # messenger guides don't need create_plates function
-#                 _guide = guide_class(
-#                     model,
-#                     init_loc_fn=init_loc_fn,
-#                     **guide_kwargs,
-#                 )
-#             else:
-#                 _guide = guide_class(
-#                     model,
-#                     init_loc_fn=init_loc_fn,
-#                     **guide_kwargs,
-#                     create_plates=self.model.create_plates,
-#                 )
-#         else:
-#             encoder_kwargs = encoder_kwargs if isinstance(encoder_kwargs, dict) else dict()
-#             n_hidden = encoder_kwargs["n_hidden"] if "n_hidden" in encoder_kwargs.keys() else 200
-#             if isinstance(data_transform, np.ndarray):
-#                 # add extra info about gene clusters as input to NN
-#                 self.register_buffer("gene_clusters", torch.tensor(data_transform.astype("float32")))
-#                 n_in = model.n_vars + data_transform.shape[1]
-#                 data_transform = self._data_transform_clusters()
-#             elif data_transform == "log1p":
-#                 # use simple log1p transform
-#                 data_transform = torch.log1p
-#                 n_in = self.model.n_vars
-#             elif (
-#                 isinstance(data_transform, dict)
-#                 and "var_std" in list(data_transform.keys())
-#                 and "var_mean" in list(data_transform.keys())
-#             ):
-#                 # use data transform by scaling
-#                 n_in = model.n_vars
-#                 self.register_buffer(
-#                     "var_mean",
-#                     torch.tensor(data_transform["var_mean"].astype("float32").reshape((1, n_in))),
-#                 )
-#                 self.register_buffer(
-#                     "var_std",
-#                     torch.tensor(data_transform["var_std"].astype("float32").reshape((1, n_in))),
-#                 )
-#                 data_transform = self._data_transform_scale()
-#             else:
-#                 # use custom data transform
-#                 data_transform = data_transform
-#                 n_in = model.n_vars
-#             amortised_vars = model.list_obs_plate_vars()
-#             if len(amortised_vars["input"]) >= 2:
-#                 encoder_kwargs["n_cat_list"] = n_cat_list
-#             amortised_vars["input_transform"][0] = data_transform
-#             if getattr(model, "discrete_variables", None) is not None:
-#                 model = poutine.block(model, hide=model.discrete_variables)
-#             _guide = AutoAmortisedHierarchicalNormalMessenger(
-#                 model,
-#                 amortised_plate_sites=amortised_vars,
-#                 n_in=n_in,
-#                 n_hidden=n_hidden,
-#                 encoder_kwargs=encoder_kwargs,
-#                 encoder_mode=encoder_mode,
-#                 encoder_instance=encoder_instance,
-#                 **guide_kwargs,
-#             )
-#         return _guide
-
-#     def _data_transform_clusters(self):
-#         def _data_transform(x):
-#             return torch.log1p(torch.cat([x, x @ self.gene_clusters], dim=1))
-
-#         return _data_transform
-
-#     def _data_transform_scale(self):
-#         def _data_transform(x):
-#             # return (x - self.var_mean) / self.var_std
-#             return x / self.var_std
-
-#         return _data_transform
 
 
 class AutoGuideMixinModule:
@@ -544,12 +529,14 @@ class QuantileMixin:
         q
             Quantile to compute
         use_gpu
-            Bool, use gpu?
+            Wheter or not use gpu.
         use_median
-            Bool, when q=0.5 use median rather than quantile method of the guide
+            When q=0.5 use median rather than quantile method of the guide
 
         Returns
         -------
+        Dict
+            A dictionary containing the posterior quantile for each parameter.
 
         """
 
@@ -586,17 +573,18 @@ class QuantileMixin:
         Parameters
         ----------
         q
-            quantile to compute
+            Quantile to compute.
         batch_size
-            number of observations per batch
+            Number of observations per batch.
         use_gpu
-            Bool, use gpu?
+            Wheter or not use gpu.
         use_median
-            Bool, when q=0.5 use median rather than quantile method of the guide
+            When q=0.5 use median rather than quantile method of the guide.
 
         Returns
         -------
-        dictionary {variable_name: posterior quantile}
+        Dict
+            A dictionary containing the posterior quantile for each parameter.
 
         """
 
@@ -786,10 +774,15 @@ class PltExportMixin:
 
     @staticmethod
     def plot_posterior_mu_vs_data(mu, data):
-        r"""Plot expected value of the model (e.g. mean of NB distribution) vs observed data
+        """
+        Plot expected value of the model (e.g. mean of NB distribution) vs observed data.
 
-        :param mu: expected value
-        :param data: data value
+        Parameters
+        ----------
+        mu
+            Expected value.
+        data
+            Data value.
         """
 
         plt.hist2d(
@@ -810,11 +803,11 @@ class PltExportMixin:
         Parameters
         ----------
         iter_start
-            omit initial iterations from the plot
+            Omit initial iterations from the plot.
         iter_end
-            omit last iterations from the plot
+            Omit last iterations from the plot.
         ax
-            matplotlib axis
+            Matplotlib axis.
 
         """
         if ax is None:
@@ -842,7 +835,7 @@ class PltExportMixin:
         Parameters
         ----------
         samples
-            dictionary with posterior mean, 5%/95% quantiles, SD, samples, generated by ``.sample_posterior()``
+            dictionary with posterior mean, 5%/95% quantiles, SD, samples, generated by ``.sample_posterior()``.
 
         Returns
         -------
@@ -881,17 +874,18 @@ class PltExportMixin:
         Parameters
         ----------
         samples
-            dictionary with posterior mean, 5%/95% quantiles, SD, samples, generated by ``.sample_posterior()``
+            Dictionary with posterior mean, 5%/95% quantiles, SD, samples, generated by ``.sample_posterior()``.
         site_name
-            name of the model parameter to be exported
+            Name of the model parameter to be exported.
         summary_name
-            posterior distribution summary to return ['means', 'stds', 'q05', 'q95']
+            Posterior distribution summary to return ['means', 'stds', 'q05', 'q95'].
         name_prefix
-            prefix to add to column names (f'{summary_name}{name_prefix}_{site_name}_{self\.factor_names_}')
+            Prefix to add to column names (f'{summary_name}{name_prefix}_{site_name}_{self\.factor_names_}').
 
         Returns
         -------
-        Pandas data frame corresponding to either means, 5%/95% quantiles or sd of the posterior distribution
+        Pandas.DataFrame
+            Pandas data frame corresponding to either means, 5%/95% quantiles or sd of the posterior distribution.
 
         """
         if type(self.factor_names_) is dict:
@@ -919,17 +913,18 @@ class PltExportMixin:
         Parameters
         ----------
         samples
-            dictionary with posterior mean, 5%/95% quantiles, SD, samples, generated by ``.sample_posterior()``
+            Dictionary with posterior mean, 5%/95% quantiles, SD, samples, generated by ``.sample_posterior()``.
         site_name
-            name of the model parameter to be exported
+            Name of the model parameter to be exported.
         summary_name
-            posterior distribution summary to return ('means', 'stds', 'q05', 'q95')
+            Posterior distribution summary to return ('means', 'stds', 'q05', 'q95').
         name_prefix
-            prefix to add to column names (f'{summary_name}{name_prefix}_{site_name}_{self\.factor_names_}')
+            Prefix to add to column names (f'{summary_name}{name_prefix}_{site_name}_{self\.factor_names_}').
 
         Returns
         -------
-        Pandas data frame corresponding to either means, 5%/95% quantiles or sd of the posterior distribution
+        Pandas.DataFrame
+            Pandas data frame corresponding to either means, 5%/95% quantiles or sd of the posterior distribution.
 
         """
         if type(self.factor_names_) is dict:
@@ -947,18 +942,16 @@ class PltExportMixin:
         """
         Show quality control plots:
 
-        1. Reconstruction accuracy to assess if there are any issues with model training.
-           The plot should be roughly diagonal, strong deviations signal problems that need to be investigated.
-           Plotting is slow because expected value of mRNA count needs to be computed from model parameters. Random
-           observations are used to speed up computation.
+        .. note::
+            Reconstruction accuracy to assess if there are any issues with model training.
+            The plot should be roughly diagonal, strong deviations signal problems that need to be investigated.
+            Plotting is slow because expected value of mRNA count needs to be computed from model parameters. Random
+            observations are used to speed up computation.
 
         Parameters
         ----------
         summary_name
-            posterior distribution summary to use ('means', 'stds', 'q05', 'q95')
-
-        Returns
-        -------
+            Posterior distribution summary to use ('means', 'stds', 'q05', 'q95').
 
         """
 
@@ -983,7 +976,16 @@ class PltExportMixin:
 class PyroAggressiveConvergence(Callback):
     """
     A callback to compute/apply aggressive training convergence criteria for amortised inference.
-    Motivated by this paper: https://arxiv.org/pdf/1901.05534.pdf
+    Motivated by this paper: https://arxiv.org/pdf/1901.05534.pdf.
+    
+    Parameters
+    ----------
+    dataloader
+        An AnnDataLoader object containing the data loader. Default is `None`.
+    patience
+        The patience for early stopping. Default is 10.
+    tolerance
+        The tolerance for early stopping. Default is 1e-4.
     """
 
     def __init__(self, dataloader: AnnDataLoader = None, patience: int = 10, tolerance: float = 1e-4) -> None:
@@ -1044,10 +1046,10 @@ class PyroAggressiveTrainingPlan1(PyroTrainingPlan):
         Number of steps to spend optimising amortised variables before one step optimising global variables.
     n_steps_kl_warmup
         Number of training steps (minibatches) to scale weight on KL divergences from 0 to 1.
-        Only activated when `n_epochs_kl_warmup` is set to None.
+        Only activated when ``n_epochs_kl_warmup`` is set to None.
     n_epochs_kl_warmup
         Number of epochs to scale weight on KL divergences from 0 to 1.
-        Overrides `n_steps_kl_warmup` when both are not `None`.
+        Overrides ``n_steps_kl_warmup`` when both are not `None`.
     """
 
     def __init__(
@@ -1096,6 +1098,17 @@ class PyroAggressiveTrainingPlan1(PyroTrainingPlan):
         )
 
     def change_requires_grad(self, aggressive_vars_status, non_aggressive_vars_status):
+        
+        """
+        Change the ``requires_grad`` status of the parameters based on provided conditions.
+
+        Parameters
+        ----------
+        aggressive_vars_status
+            The status to set for aggressive variables. Options are "hide" or "expose".
+        non_aggressive_vars_status
+            The status to set for non-aggressive variables. Options are "hide" or "expose".
+        """
 
         for k, v in self.module.guide.named_parameters():
             k_in_vars = np.any([i in k for i in self.aggressive_vars])
@@ -1114,6 +1127,14 @@ class PyroAggressiveTrainingPlan1(PyroTrainingPlan):
                 v.requires_grad = True
 
     def training_epoch_end(self, outputs):
+        """
+        Method called at the end of each training epoch.
+
+        Parameters
+        ----------
+        outputs
+            List of dictionaries containing the output of each training step.
+        """
 
         self.aggressive_epochs_counter += 1
 
@@ -1126,7 +1147,21 @@ class PyroAggressiveTrainingPlan1(PyroTrainingPlan):
         self.log("elbo_train", elbo, prog_bar=True)
 
     def training_step(self, batch, batch_idx):
+        """
+        Method called for each training batch.
 
+        Parameters
+        ----------
+        batch
+            The batch of data.
+        batch_idx
+            The index of the current batch.
+
+        Returns
+        -------
+        dict
+            A dictionary containing the loss value for the current batch.
+        """
         args, kwargs = self.module._get_fn_args_from_batch(batch)
         # Set KL weight if necessary.
         # Note: if applied, ELBO loss in progress bar is the effective KL annealed loss, not the true ELBO.
@@ -1191,10 +1226,10 @@ class PyroAggressiveTrainingPlan(PyroAggressiveTrainingPlan1):
         Keyword arguments for **default** optimiser :class:`pyro.optim.Adam`.
     n_steps_kl_warmup
         Number of training steps (minibatches) to scale weight on KL divergences from 0 to 1.
-        Only activated when `n_epochs_kl_warmup` is set to None.
+        Only activated when``n_epochs_kl_warmup``is set to None.
     n_epochs_kl_warmup
         Number of epochs to scale weight on KL divergences from 0 to 1.
-        Overrides `n_steps_kl_warmup` when both are not `None`.
+        Overrides ``n_steps_kl_warmup`` when both are not `None`.
     """
 
     def __init__(
@@ -1249,7 +1284,7 @@ class MyAutoHierarchicalNormalMessenger(AutoHierarchicalNormalMessenger):
 
         :returns: A dict mapping sample site name to sample value.
             This includes latent, deterministic, and observed values.
-        :rtype: dict
+        :rtype: Dict
         """
         self.args_kwargs = args, kwargs
         try:
@@ -1308,6 +1343,22 @@ class MyAutoHierarchicalNormalMessenger(AutoHierarchicalNormalMessenger):
         name: str,
         prior: Distribution,
     ) -> Union[Distribution, torch.Tensor]:
+        """
+        Get the posterior quantile or median.
+
+        Parameters
+        ----------
+        name
+            The name of the parameter.
+        prior
+            The prior distribution.
+
+        Returns
+        -------
+        Union[Distribution, torch.Tensor]
+            The posterior quantile or median.
+        """
+
         if self._computing_median:
             return self._get_posterior_median(name, prior)
         if self._computing_quantiles:
@@ -1317,12 +1368,28 @@ class MyAutoHierarchicalNormalMessenger(AutoHierarchicalNormalMessenger):
     
     
     def quantiles(self, quantiles, *args, **kwargs):
+        """
+        Compute quantiles of the posterior distribution.
+
+        Parameters
+        ----------
+        quantiles
+            List of quantiles to compute.
+        *args, **kwargs
+            Additional arguments and keyword arguments to be passed to the underlying function.
+
+        Returns
+        -------
+        List
+            The result of the computation.
+        """
+
         self._computing_quantiles = True
         self._quantile_values = quantiles
         try:
             return self(*args, **kwargs)
         finally:
-            print("test")
+            print(f"Sampled for quantile: {quantiles[0]}")
 
     @torch.no_grad()
     def _get_posterior_quantiles(self, name, prior):
@@ -1344,16 +1411,6 @@ class MyAutoHierarchicalNormalMessenger(AutoHierarchicalNormalMessenger):
         self.quantile_dict[name]=transform(site_quantiles_values)
         return transform(site_quantiles_values)
 
-from scvi.module.base import PyroBaseModuleClass
-from scvi.train import PyroTrainingPlan
-from typing import Optional, Union
-import pyro
-
-max_epochs = 4000
-start_lr = 0.01
-final_lr = 0.001
-lrd = (final_lr/start_lr)**(1/max_epochs)
-clipped_adam = pyro.optim.ClippedAdam({"lr": start_lr, "lrd": lrd,  "clip_norm": 10.0})
 
 class PyroTrainingPlan_ClippedAdamDecayingRate(PyroTrainingPlan):
     """
@@ -1361,14 +1418,11 @@ class PyroTrainingPlan_ClippedAdamDecayingRate(PyroTrainingPlan):
     Parameters
     ----------
     pyro_module
-        An instance of :class:`~scvi.module.base.PyroBaseModuleClass`. This object
-        should have callable `model` and `guide` attributes or methods.
+        An instance of :class:`~scvi.module.base.PyroBaseModuleClass`. This object should have callable `model` and `guide` attributes or methods.
     loss_fn
-        A Pyro loss. Should be a subclass of :class:`~pyro.infer.ELBO`.
-        If `None`, defaults to :class:`~pyro.infer.Trace_ELBO`.
+        A Pyro loss. Should be a subclass of :class:`~pyro.infer.ELBO`. If `None`, defaults to :class:`~pyro.infer.Trace_ELBO`.
     optim
-        A Pyro optimizer instance, e.g., :class:`~pyro.optim.Adam`. If `None`,
-        defaults to :class:`pyro.optim.Adam` optimizer with a learning rate of `1e-3`.
+        A Pyro optimizer instance, e.g., :class:`~pyro.optim.Adam`. If `None`, defaults to :class:`pyro.optim.Adam` optimizer with a learning rate of `1e-3`.
     optim_kwargs
         Keyword arguments for **default** optimiser :class:`pyro.optim.Adam`.
     n_aggressive_epochs
@@ -1376,11 +1430,9 @@ class PyroTrainingPlan_ClippedAdamDecayingRate(PyroTrainingPlan):
     n_aggressive_steps
         Number of steps to spend optimising amortised variables before one step optimising global variables.
     n_steps_kl_warmup
-        Number of training steps (minibatches) to scale weight on KL divergences from 0 to 1.
-        Only activated when `n_epochs_kl_warmup` is set to None.
+        Number of training steps (minibatches) to scale weight on KL divergences from 0 to 1. Only activated when `n_epochs_kl_warmup` is set to None.
     n_epochs_kl_warmup
-        Number of epochs to scale weight on KL divergences from 0 to 1.
-        Overrides `n_steps_kl_warmup` when both are not `None`.
+        Number of epochs to scale weight on KL divergences from 0 to 1. Overrides `n_steps_kl_warmup` when both are not `None`.
     """
 
     def __init__(

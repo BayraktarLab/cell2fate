@@ -20,8 +20,22 @@ from cell2fate.nn import FCLayers
 
 
 def log_sum_exp(value, dim=None, keepdim=False):
-    """Numerically stable implementation of the operation
-    value.exp().sum(dim, keepdim).log()
+    """
+    Numerically stable implementation of the operation value.exp().sum(dim, keepdim).log()
+
+    Parameters
+    ----------
+    value 
+        The input tensor.
+    dim 
+        The dimension along which to compute the operation. Default is None.
+    keepdim 
+        Whether to keep the dimension after the operation. Default is False.
+
+    Returns
+    -------
+    torch.Tensor
+        The result of the operation.
     """
     if dim is not None:
         m, _ = torch.max(value, dim=dim, keepdim=True)
@@ -101,7 +115,6 @@ class AutoAmortisedHierarchicalNormalMessenger(AutoHierarchicalNormalMessenger):
         If None, all sites are assumed to have hierarchical dependencies. If None, for the sites
         that don't have upstream sites, the guide is representing/learning deviation from the prior.
     """
-
     # 'element-wise' or 'scalar'
     weight_type = "element-wise"
 
@@ -209,14 +222,18 @@ class AutoAmortisedHierarchicalNormalMessenger(AutoHierarchicalNormalMessenger):
     def encode(self, name: str, prior: Distribution):
         """
         Apply encoder network to input data to obtain hidden layer encoding.
+
         Parameters
         ----------
-        args
-            Pyro model args
-        kwargs
-            Pyro model kwargs
-        -------
+        name
+            The name of the encoder.
+        prior
+            The prior distribution.
 
+        Returns
+        -------
+        torch.Tensor
+            The encoded data.
         """
         try:
             args, kwargs = self.args_kwargs  # stored as a tuple of (tuple, dict)
@@ -486,6 +503,22 @@ class AutoAmortisedHierarchicalNormalMessenger(AutoHierarchicalNormalMessenger):
         return self._get_params(name, prior)
 
     def median(self, *args, **kwargs):
+        """
+        Calculate the median value.
+
+        Args:
+            *args: Positional arguments passed to the function.
+            **kwargs: Keyword arguments passed to the function.
+
+        Returns:
+            The median value.
+
+        Note:
+            This method sets ``_computing_median`` flag to True while computing the median
+            and sets it back to False after computation.
+
+        """
+    
         self._computing_median = True
         try:
             return self(*args, **kwargs)
@@ -503,6 +536,23 @@ class AutoAmortisedHierarchicalNormalMessenger(AutoHierarchicalNormalMessenger):
         return transform(loc)
 
     def quantiles(self, quantiles, *args, **kwargs):
+        
+        """
+        Calculate the specified quantiles.
+
+        Args:
+            quantiles: List of quantiles to compute.
+            *args: Positional arguments passed to the function.
+            **kwargs: Keyword arguments passed to the function.
+
+        Returns:
+            The values at the specified quantiles.
+
+        Note:
+            This method sets ``_computing_quantiles`` flag to True while computing the quantiles
+            and sets it back to False after computation. It also sets ``_quantile_values`` attribute
+            to the list of quantiles being computed.
+        """
         self._computing_quantiles = True
         self._quantile_values = quantiles
         try:
@@ -524,6 +574,23 @@ class AutoAmortisedHierarchicalNormalMessenger(AutoHierarchicalNormalMessenger):
         return transform(site_quantiles_values)
 
     def mutual_information(self, *args, **kwargs):
+        """
+        Calculate the mutual information.
+
+        Args:
+            *args: Positional arguments passed to the function.
+            **kwargs: Keyword arguments passed to the function.
+
+        Returns:
+            The mutual information.
+
+        Note:
+            This method computes samples necessary to compute mutual information and saves them
+            to ``self.samples_for_mi``. It sets ``_computing_mi`` flag to True while computing mutual information
+            and sets it back to False after computation. The mutual information value is saved to ``self.mi``.
+        """
+
+        
         # compute samples necessary to compute MI
         self.samples_for_mi = self(*args, **kwargs)
         self._computing_mi = True

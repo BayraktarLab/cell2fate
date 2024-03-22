@@ -1,3 +1,5 @@
+[![Run tests](https://github.com/BayraktarLab/cell2fate/actions/workflows/run_tests.yml/badge.svg)](https://github.com/BayraktarLab/cell2fate/actions/workflows/run_tests.yml)  [![codecov](https://codecov.io/gh/BayraktarLab/cell2fate/graph/badge.svg?token=CCJTK20MA7)](https://codecov.io/gh/BayraktarLab/cell2fate)
+
 ![alt text](https://github.com/BayraktarLab/cell2fate/blob/main/cell2fate_diagram.png?raw=true)
 
 ## Usage and Tutorials
@@ -50,3 +52,4 @@ Before installing cell2fate and it's dependencies, it could be necessary to make
 ```bash
 export PYTHONNOUSERSITE="someletters"
 ```
+

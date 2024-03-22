@@ -1,0 +1,5 @@
+git+https://github.com/BayraktarLab/cell2fate.git
+sphinx==7.2.6 
+sphinx_rtd_theme
+nbsphinx
+myst_parser
