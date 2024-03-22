@@ -45,6 +45,6 @@ jobs:
         flags: test-coverage
         file: ./coverage.xml
         verbose: true
-        slug: sezginerr/cell2fate
+        slug: BayraktarLab/cell2fate
       env:
         CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
