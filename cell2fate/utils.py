@@ -18,7 +18,7 @@ import cell2fate as c2f
 
 import torch
 
-def robust_optimization(mod, save_dir, max_epochs = [200, 400], lr = [0.01, 0.01]):
+def robust_optimization(mod, save_dir, max_epochs = [200, 400], lr = [0.01, 0.01], use_gpu = True):
     """
     Perform robust optimization of the model.
 
@@ -42,16 +42,16 @@ def robust_optimization(mod, save_dir, max_epochs = [200, 400], lr = [0.01, 0.01
     n_modules = mod.module.model.n_modules
     adata = mod.adata
     print('First optimization run.')
-    mod.train(use_gpu=True, max_epochs = max_epochs[0], lr = lr[0])
+    mod.train(use_gpu=use_gpu, max_epochs = max_epochs[0], lr = lr[0])
     sample_kwarg = {"num_samples": 1, "batch_size" : 1000,
-                     "use_gpu" : True, 'return_samples': False}
+                     "use_gpu" : use_gpu, 'return_samples': False}
     mod.adata = mod.export_posterior(mod.adata, sample_kwargs=sample_kwarg)
     t_c = np.argsort(np.array(mod.samples['post_sample_means']['t_c']).flatten())/len(np.array(mod.samples['post_sample_means']['t_c']))
     t_c_reversed = -1*(t_c - np.max(t_c))
     print('Second optimization run.')
     del mod
     mod1 = c2f.Cell2fate_DynamicalModel(adata, n_modules = n_modules, init_vals = {'t_c': torch.tensor(t_c).reshape([len(t_c), 1, 1])})
-    mod1.train(use_gpu=True, max_epochs = max_epochs[1], lr = lr[1])
+    mod1.train(use_gpu=use_gpu, max_epochs = max_epochs[1], lr = lr[1])
     history1 = mod1.history
     mod1.save(save_dir+'c2f_model', overwrite=True)
     mod1.adata.write(save_dir+"c2f_model_anndata.h5ad")
@@ -59,7 +59,7 @@ def robust_optimization(mod, save_dir, max_epochs = [200, 400], lr = [0.01, 0.01
     print('Third optimization run.')
     mod2 = c2f.Cell2fate_DynamicalModel(adata, n_modules = n_modules, init_vals = {'t_c': torch.tensor(t_c_reversed).reshape([len(t_c_reversed), 1, 1])})
     del adata
-    mod2.train(use_gpu=True, max_epochs = max_epochs[1], lr = lr[1])
+    mod2.train(use_gpu=use_gpu, max_epochs = max_epochs[1], lr = lr[1])
     history2 = mod2.history
 
     iter_start=0
