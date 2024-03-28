@@ -270,7 +270,10 @@ class AutoGuideMixinModule:
             amortised_vars = model.list_obs_plate_vars()
             if len(amortised_vars["input"]) >= 2:
                 encoder_kwargs["n_cat_list"] = n_cat_list
-            n_in = amortised_vars["n_in"]
+            if "n_in" in amortised_vars.keys():
+                n_in = amortised_vars["n_in"]
+            else:
+                n_in = model.n_vars
             if getattr(model, "discrete_variables", None) is not None:
                 model = poutine.block(model, hide=model.discrete_variables)
             _guide = AutoAmortisedHierarchicalNormalMessenger(

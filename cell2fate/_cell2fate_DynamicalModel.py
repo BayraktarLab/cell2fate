@@ -373,7 +373,8 @@ class Cell2fate_DynamicalModel(QuantileMixin, PyroSampleMixin, PyroSviTrainMixin
         export_slot: str = "mod",
         full_velocity_posterior = False,
         normalize = True, 
-        use_gpu = True):
+        use_gpu = True,
+        use_median = False):
         
         """
         Exports posteriors as quantiles. Similar to :py:meth:`cell2fate.Cell2fate_DynamicalModel.export_posterior` for more scalable workflow.
@@ -406,7 +407,7 @@ class Cell2fate_DynamicalModel(QuantileMixin, PyroSampleMixin, PyroSviTrainMixin
         
         quantiles_dict = {}
         for quantile in quantiles:
-            quantiles_dict[str(quantile)]=self.posterior_quantile(q=quantile,batch_size=batch_size, use_gpu=use_gpu)
+            quantiles_dict[str(quantile)]=self.posterior_quantile(q=quantile,batch_size=batch_size, use_gpu=use_gpu, use_median=use_median)
         adata.uns[export_slot] = self._export2adata_quantiles(quantiles_dict)
 
         self.samples = {}

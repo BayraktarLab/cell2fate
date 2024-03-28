@@ -112,7 +112,10 @@ def test_cell2fate():
     
     # test setup AnnData object for Cell2fate
     c2f.Cell2fate_DynamicalModel.setup_anndata(adata_train, spliced_label='spliced', unspliced_label='unspliced')
-        
+    
+    # test amortized
+    mod_amortized = c2f.Cell2fate_DynamicalModel(adata_train, n_modules=n_modules, amortised=True)
+    
     # test initialize Cell2fate model
     mod = c2f.Cell2fate_DynamicalModel(adata_train, n_modules=n_modules)
     
@@ -169,3 +172,5 @@ def test_cell2fate():
          early_stopping = True, early_stopping_min_delta = 10**(-4),
          early_stopping_monitor = 'elbo_train', early_stopping_patience = 10, accelerator=accelerator)
     adata_quantile_posterior=mod.export_posterior_quantiles(adata_train,batch_size=50,use_gpu=use_gpu)
+    
+test_cell2fate()
