@@ -112,10 +112,7 @@ def test_cell2fate():
     
     # test setup AnnData object for Cell2fate
     c2f.Cell2fate_DynamicalModel.setup_anndata(adata_train, spliced_label='spliced', unspliced_label='unspliced')
-    
-    # test amortized
-    mod_amortized = c2f.Cell2fate_DynamicalModel(adata_train, n_modules=n_modules, amortised=True)
-    
+        
     # test initialize Cell2fate model
     mod = c2f.Cell2fate_DynamicalModel(adata_train, n_modules=n_modules)
     
@@ -127,6 +124,13 @@ def test_cell2fate():
     
     # test train the model with one epoch using a specific batch size
     mod.train(max_epochs=1, batch_size=10, accelerator=accelerator)
+    
+    #test robust optimization
+    mod = c2f.utils.robust_optimization(mod,save_path, use_gpu = use_gpu, max_epochs = [1,2])
+    
+    # test amortized
+    mod_amortised = c2f.Cell2fate_DynamicalModel(adata_train, n_modules=n_modules, amortised=True)
+    mod_amortised.train(max_epochs=1, accelerator=accelerator)
     
     # test save/load
     mod.save(save_path, overwrite=True, save_anndata=True)
@@ -141,7 +145,7 @@ def test_cell2fate():
     
     # test compute module summary statistics
     adata_posterior = mod.compute_module_summary_statistics(adata_posterior)
-        
+            
     # test plot module summary statistics
     mod.plot_module_summary_statistics(adata_posterior, save=None)
 
@@ -153,6 +157,9 @@ def test_cell2fate():
 
     # test compute and plot total velocity
     mod.compute_and_plot_total_velocity(adata_posterior, save=None, delete=False)
+    
+    #test plot_velocity_umap_Bergen2020
+    c2f.utils.plot_velocity_umap_Bergen2020(adata_posterior, plotting_kwargs={}, spliced_key="spliced")
 
     # test visualize module trajectories
     chosen_module = 0
@@ -172,5 +179,6 @@ def test_cell2fate():
          early_stopping = True, early_stopping_min_delta = 10**(-4),
          early_stopping_monitor = 'elbo_train', early_stopping_patience = 10, accelerator=accelerator)
     adata_quantile_posterior=mod.export_posterior_quantiles(adata_train,batch_size=50,use_gpu=use_gpu)
+    
     
 test_cell2fate()
