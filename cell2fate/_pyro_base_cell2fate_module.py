@@ -12,6 +12,7 @@ class Cell2FateBaseModule(PyroBaseModuleClass, AutoGuideMixinModule):
         encoder_kwargs=None,
         data_transform="log1p",
         guide_class=AutoHierarchicalNormalMessenger,
+        encoder_instance=None,
         **kwargs,
     ):
         """
@@ -43,6 +44,7 @@ class Cell2FateBaseModule(PyroBaseModuleClass, AutoGuideMixinModule):
             init_loc_fn=self.init_to_value,
             guide_class=guide_class,
             n_cat_list=[kwargs["n_batch"]],
+            encoder_instance=encoder_instance
         )
 
         self._get_fn_args_from_batch = self._model._get_fn_args_from_batch

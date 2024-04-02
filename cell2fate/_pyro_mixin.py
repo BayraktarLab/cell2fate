@@ -22,9 +22,9 @@ from scvi.train import PyroTrainingPlan
 from scvi.utils import track
 
 
-from cell2fate.AutoAmortisedNormalMessenger import (
-    AutoAmortisedHierarchicalNormalMessenger,
-)
+#from cell2fate.AutoAmortisedNormalMessenger import (
+#    AutoAmortisedHierarchicalNormalMessenger,
+#)
 
 logger = logging.getLogger(__name__)
        
@@ -265,28 +265,26 @@ class AutoGuideMixinModule:
                     create_plates=self.model.create_plates,
                 )
         else:
-            encoder_kwargs = encoder_kwargs if isinstance(encoder_kwargs, dict) else dict()
-            n_hidden = encoder_kwargs["n_hidden"] if "n_hidden" in encoder_kwargs.keys() else 200
-            amortised_vars = model.list_obs_plate_vars()
-            if len(amortised_vars["input"]) >= 2:
-                encoder_kwargs["n_cat_list"] = n_cat_list
-            if "n_in" in amortised_vars.keys():
-                n_in = amortised_vars["n_in"]
-            else:
-                n_in = model.n_vars
+            print("Amortized inference is currently experimental. Please refer to the experimental GitHub repository. For now, model will run with non-amortized inference.")
+            
             if getattr(model, "discrete_variables", None) is not None:
                 model = poutine.block(model, hide=model.discrete_variables)
-            _guide = AutoAmortisedHierarchicalNormalMessenger(
-                model,
-                amortised_plate_sites=amortised_vars,
-                n_in=n_in,
-                n_hidden=n_hidden,
-                encoder_kwargs=encoder_kwargs,
-                encoder_mode=encoder_mode,
-                encoder_instance=encoder_instance,
-                init_loc_fn=init_loc_fn,
-                **guide_kwargs,
-            )
+            if issubclass(guide_class, poutine.messenger.Messenger):
+                # messenger guides don't need create_plates function
+                _guide = guide_class(
+                    model,
+                    init_loc_fn=init_loc_fn,
+                    **guide_kwargs,
+                )
+            else:
+                _guide = guide_class(
+                    model,
+                    init_loc_fn=init_loc_fn,
+                    **guide_kwargs,
+                    create_plates=self.model.create_plates,
+                )
+
+            
         return _guide
 
 class QuantileMixin:
@@ -393,133 +391,7 @@ class QuantileMixin:
         return obs_plate
 
     
-    
-    def _posterior_quantile_minibatch(
-        self, q: float = 0.5, batch_size: int = 2048, use_gpu: bool = None, use_median: bool = False
-    ):
-        """
-        Compute median of the posterior distribution of each parameter, separating local (minibatch) variable
-        and global variables, which is necessary when performing amortised inference.
 
-        Note for developers: requires model class method which lists observation/minibatch plate
-        variables (self.module.model.list_obs_plate_vars()).
-
-        Parameters
-        ----------
-        q
-            quantile to compute
-        batch_size
-            number of observations per batch
-        use_gpu
-            Bool, use gpu?
-        use_median
-            Bool, when q=0.5 use median rather than quantile method of the guide
-
-        Returns
-        -------
-        dictionary {variable_name: posterior quantile}
-
-        """
-
-        gpus, device = parse_use_gpu_arg(use_gpu)
-
-        self.module.eval()
-
-        train_dl = AnnDataLoader(self.adata_manager, shuffle=False, batch_size=batch_size)
-
-        # sample local parameters
-        i = 0
-        for tensor_dict in train_dl:
-
-            args, kwargs = self.module._get_fn_args_from_batch(tensor_dict)
-            args = [a.to(device) for a in args]
-            kwargs = {k: v.to(device) for k, v in kwargs.items()}
-            self.to_device(device)
-
-            if i == 0:
-                # find plate sites
-                obs_plate_sites = self._get_obs_plate_sites(args, kwargs, return_observed=True)
-                if len(obs_plate_sites) == 0:
-                    # if no local variables - don't sample
-                    break
-                # find plate dimension
-                obs_plate_dim = list(obs_plate_sites.values())[0]
-                if use_median and q == 0.5:
-                    means = self.module.guide.median(*args, **kwargs)
-                else:
-                    means = self.module.guide.quantiles([q], *args, **kwargs)
-                means = {k: means[k].cpu().numpy() for k in means.keys() if k in obs_plate_sites}
-
-            else:
-                if use_median and q == 0.5:
-                    means_ = self.module.guide.median(*args, **kwargs)
-                else:
-                    means_ = self.module.guide.quantiles([q], *args, **kwargs)
-
-                means_ = {k: means_[k].cpu().numpy() for k in means_.keys() if k in obs_plate_sites}
-                means = {k: np.concatenate([means[k], means_[k]], axis=obs_plate_dim) for k in means.keys()}
-            i += 1
-        # sample global parameters
-        tensor_dict = next(iter(train_dl))
-        args, kwargs = self.module._get_fn_args_from_batch(tensor_dict)
-        args = [a.to(device) for a in args]
-        kwargs = {k: v.to(device) for k, v in kwargs.items()}
-        self.to_device(device)
-
-        if use_median and q == 0.5:
-            global_means = self.module.guide.median(*args, **kwargs)
-        else:
-            global_means = self.module.guide.quantiles([q], *args, **kwargs)
-        global_means = {k: global_means[k].cpu().numpy() for k in global_means.keys() if k not in obs_plate_sites}
-
-        for k in global_means.keys():
-            means[k] = global_means[k]
-
-        self.module.to(device)
-
-        return means
-
-    @torch.no_grad()
-    def _posterior_quantile(
-        self, q: float = 0.5, batch_size: int = None, use_gpu: bool = None, use_median: bool = False
-    ):
-        """
-        Compute median of the posterior distribution of each parameter pyro models trained without amortised inference.
-
-        Parameters
-        ----------
-        q
-            Quantile to compute
-        use_gpu
-            Bool, use gpu?
-        use_median
-            Bool, when q=0.5 use median rather than quantile method of the guide
-
-        Returns
-        -------
-        dictionary {variable_name: posterior quantile}
-
-        """
-
-        self.module.eval()
-        gpus, device = parse_use_gpu_arg(use_gpu)
-        if batch_size is None:
-            batch_size = self.adata_manager.adata.n_obs
-        train_dl = AnnDataLoader(self.adata_manager, shuffle=False, batch_size=batch_size)
-        # sample global parameters
-        tensor_dict = next(iter(train_dl))
-        args, kwargs = self.module._get_fn_args_from_batch(tensor_dict)
-        args = [a.to(device) for a in args]
-        kwargs = {k: v.to(device) for k, v in kwargs.items()}
-        self.to_device(device)
-
-        if use_median and q == 0.5:
-            means = self.module.guide.median(*args, **kwargs)
-        else:
-            means = self.module.guide.quantiles([q], *args, **kwargs)
-        means = {k: means[k].cpu().detach().numpy() for k in means.keys()}
-
-        return means
 
     def posterior_quantile(
         self, q: float = 0.5, batch_size: int = 2048, use_gpu: bool = None, use_median: bool = False
@@ -543,17 +415,12 @@ class QuantileMixin:
 
         """
 
-        return self._posterior_quantile_minibatch_v2(
+        return self._posterior_quantile_minibatch(
             q=q, batch_size=batch_size, use_gpu=use_gpu, use_median=use_median
         )
-        
-        
-        
-        
-        
 
     @torch.no_grad()
-    def _posterior_quantile_minibatch_v2(
+    def _posterior_quantile_minibatch(
         self,
         q: list = 0.5,
         batch_size: int = 128,
@@ -767,214 +634,6 @@ class QuantileMixin:
         self.module.to(device)
 
         return means_global
-
-
-
-class PltExportMixin:
-    r"""
-    This mixing class provides methods for common plotting tasks and data export.
-    """
-
-    @staticmethod
-    def plot_posterior_mu_vs_data(mu, data):
-        """
-        Plot expected value of the model (e.g. mean of NB distribution) vs observed data.
-
-        Parameters
-        ----------
-        mu
-            Expected value.
-        data
-            Data value.
-        """
-
-        plt.hist2d(
-            np.log10(data.flatten() + 1),
-            np.log10(mu.flatten() + 1),
-            bins=50,
-            norm=matplotlib.colors.LogNorm(),
-        )
-        plt.gca().set_aspect("equal", adjustable="box")
-        plt.xlabel("Data, log10")
-        plt.ylabel("Posterior expected value, log10")
-        plt.title("Reconstruction accuracy")
-        plt.tight_layout()
-
-    def plot_history(self, iter_start=0, iter_end=-1, ax=None):
-        r"""Plot training history
-
-        Parameters
-        ----------
-        iter_start
-            Omit initial iterations from the plot.
-        iter_end
-            Omit last iterations from the plot.
-        ax
-            Matplotlib axis.
-
-        """
-        if ax is None:
-            ax = plt
-            ax.set_xlabel = plt.xlabel
-            ax.set_ylabel = plt.ylabel
-        if iter_end == -1:
-            iter_end = len(self.history_["elbo_train"])
-
-        ax.plot(
-            self.history_["elbo_train"].index[iter_start:iter_end],
-            np.array(self.history_["elbo_train"].values.flatten())[iter_start:iter_end],
-            label="train",
-        )
-        ax.legend()
-        ax.xlim(0, len(self.history_["elbo_train"]))
-        ax.set_xlabel("Training epochs")
-        ax.set_ylabel("-ELBO loss")
-        plt.tight_layout()
-
-    def _export2adata(self, samples):
-        r"""
-        Export key model variables and samples
-
-        Parameters
-        ----------
-        samples
-            dictionary with posterior mean, 5%/95% quantiles, SD, samples, generated by ``.sample_posterior()``.
-
-        Returns
-        -------
-            Updated dictionary with additional details is saved to ``adata.uns['mod']``.
-        """
-        # add factor filter and samples of all parameters to unstructured data
-        results = {
-            "model_name": str(self.module.__class__.__name__),
-            "date": str(date.today()),
-            "factor_filter": list(getattr(self, "factor_filter", [])),
-            "factor_names": list(self.factor_names_),
-            "var_names": self.adata.var_names.tolist(),
-            "obs_names": self.adata.obs_names.tolist(),
-            "post_sample_means": samples["post_sample_means"],
-            "post_sample_stds": samples["post_sample_stds"],
-            "post_sample_q05": samples["post_sample_q05"],
-            "post_sample_q95": samples["post_sample_q95"],
-        }
-        if type(self.factor_names_) is dict:
-            results["factor_names"] = self.factor_names_
-
-        return results
-
-    def sample2df_obs(
-        self,
-        samples: dict,
-        site_name: str = "w_sf",
-        summary_name: str = "means",
-        name_prefix: str = "cell_abundance",
-        factor_names_key: str = "",
-    ):
-        """Export posterior distribution summary for observation-specific parameters
-        (e.g. spatial cell abundance) as Pandas data frame
-        (means, 5%/95% quantiles or sd of posterior distribution).
-
-        Parameters
-        ----------
-        samples
-            Dictionary with posterior mean, 5%/95% quantiles, SD, samples, generated by ``.sample_posterior()``.
-        site_name
-            Name of the model parameter to be exported.
-        summary_name
-            Posterior distribution summary to return ['means', 'stds', 'q05', 'q95'].
-        name_prefix
-            Prefix to add to column names (f'{summary_name}{name_prefix}_{site_name}_{self\.factor_names_}').
-
-        Returns
-        -------
-        Pandas.DataFrame
-            Pandas data frame corresponding to either means, 5%/95% quantiles or sd of the posterior distribution.
-
-        """
-        if type(self.factor_names_) is dict:
-            factor_names_ = self.factor_names_[factor_names_key]
-        else:
-            factor_names_ = self.factor_names_
-
-        return pd.DataFrame(
-            samples[f"post_sample_{summary_name}"].get(site_name, None),
-            index=self.adata.obs_names,
-            columns=[f"{summary_name}{name_prefix}_{site_name}_{i}" for i in factor_names_],
-        )
-
-    def sample2df_vars(
-        self,
-        samples: dict,
-        site_name: str = "gene_factors",
-        summary_name: str = "means",
-        name_prefix: str = "",
-        factor_names_key: str = "",
-    ):
-        r"""Export posterior distribution summary for variable-specific parameters as Pandas data frame
-        (means, 5%/95% quantiles or sd of posterior distribution).
-
-        Parameters
-        ----------
-        samples
-            Dictionary with posterior mean, 5%/95% quantiles, SD, samples, generated by ``.sample_posterior()``.
-        site_name
-            Name of the model parameter to be exported.
-        summary_name
-            Posterior distribution summary to return ('means', 'stds', 'q05', 'q95').
-        name_prefix
-            Prefix to add to column names (f'{summary_name}{name_prefix}_{site_name}_{self\.factor_names_}').
-
-        Returns
-        -------
-        Pandas.DataFrame
-            Pandas data frame corresponding to either means, 5%/95% quantiles or sd of the posterior distribution.
-
-        """
-        if type(self.factor_names_) is dict:
-            factor_names_ = self.factor_names_[factor_names_key]
-        else:
-            factor_names_ = self.factor_names_
-
-        return pd.DataFrame(
-            samples[f"post_sample_{summary_name}"].get(site_name, None),
-            columns=self.adata.var_names,
-            index=[f"{summary_name}{name_prefix}_{site_name}_{i}" for i in factor_names_],
-        ).T
-
-    def plot_QC(self, summary_name: str = "means", use_n_obs: int = 1000):
-        """
-        Show quality control plots:
-
-        .. note::
-            Reconstruction accuracy to assess if there are any issues with model training.
-            The plot should be roughly diagonal, strong deviations signal problems that need to be investigated.
-            Plotting is slow because expected value of mRNA count needs to be computed from model parameters. Random
-            observations are used to speed up computation.
-
-        Parameters
-        ----------
-        summary_name
-            Posterior distribution summary to use ('means', 'stds', 'q05', 'q95').
-
-        """
-
-        if getattr(self, "samples", False) is False:
-            raise RuntimeError("self.samples is missing, please run self.export_posterior() first")
-        if use_n_obs is not None:
-            ind_x = np.random.choice(
-                self.adata_manager.adata.n_obs, np.min((use_n_obs, self.adata.n_obs)), replace=False
-            )
-        else:
-            ind_x = None
-
-        self.expected_nb_param = self.module.model.compute_expected(
-            self.samples[f"post_sample_{summary_name}"], self.adata_manager, ind_x=ind_x
-        )
-        x_data = self.adata_manager.get_from_registry(REGISTRY_KEYS.X_KEY)[ind_x, :]
-        if issparse(x_data):
-            x_data = np.asarray(x_data.toarray())
-        self.plot_posterior_mu_vs_data(self.expected_nb_param["mu"], x_data)
-
 
 class PyroAggressiveConvergence(Callback):
     """
