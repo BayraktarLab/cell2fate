@@ -45,4 +45,3 @@ Before installing cell2fate and it's dependencies, it could be necessary to make
 ```bash
 export PYTHONNOUSERSITE="someletters"
 ```
-

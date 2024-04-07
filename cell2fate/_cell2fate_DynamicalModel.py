@@ -33,7 +33,7 @@ from ._velocity_embedding_stream import velocity_embedding_stream_modules
 import scipy
 import gseapy as gp
 from cell2fate._pyro_base_cell2fate_module import Cell2FateBaseModule
-from cell2fate._pyro_mixin import PltExportMixin, QuantileMixin
+from cell2fate._pyro_mixin import QuantileMixin
 from ._cell2fate_DynamicalModel_module import \
 Cell2fate_DynamicalModel_module
 from cell2fate.utils import multiplot_from_generator
@@ -41,7 +41,7 @@ from cell2fate.utils import multiplot_from_generator
 from cell2fate.utils import mu_mRNA_continousAlpha_globalTime_twoStates
 import cell2fate as c2f
 
-class Cell2fate_DynamicalModel(QuantileMixin, PyroSampleMixin, PyroSviTrainMixin, PltExportMixin, BaseModelClass):
+class Cell2fate_DynamicalModel(QuantileMixin, PyroSampleMixin, PyroSviTrainMixin, BaseModelClass):
     r"""
     Cell2fate model. User-end model class.
     
@@ -79,6 +79,8 @@ class Cell2fate_DynamicalModel(QuantileMixin, PyroSampleMixin, PyroSviTrainMixin
             n_batch=self.summary_stats["n_batch"],
             **model_kwargs,
         )
+        
+        
         self._model_summary_string = f'Cell2fate Dynamical Model with the following params: \nn_batch: {self.summary_stats["n_batch"]} '
         self.init_params_ = self._get_init_params(locals())
 
@@ -217,6 +219,37 @@ class Cell2fate_DynamicalModel(QuantileMixin, PyroSampleMixin, PyroSviTrainMixin
         return results
 
     
+    def plot_history(self, iter_start=0, iter_end=-1, ax=None):
+        r"""Plot training history
+
+        Parameters
+        ----------
+        iter_start
+            Omit initial iterations from the plot.
+        iter_end
+            Omit last iterations from the plot.
+        ax
+            Matplotlib axis.
+
+        """
+        if ax is None:
+            ax = plt
+            ax.set_xlabel = plt.xlabel
+            ax.set_ylabel = plt.ylabel
+        if iter_end == -1:
+            iter_end = len(self.history_["elbo_train"])
+
+        ax.plot(
+            self.history_["elbo_train"].index[iter_start:iter_end],
+            np.array(self.history_["elbo_train"].values.flatten())[iter_start:iter_end],
+            label="train",
+        )
+        ax.legend()
+        ax.xlim(0, len(self.history_["elbo_train"]))
+        ax.set_xlabel("Training epochs")
+        ax.set_ylabel("-ELBO loss")
+        plt.tight_layout()
+
     
     def compute_module_summary_statistics(self, adata):
         """
@@ -373,7 +406,8 @@ class Cell2fate_DynamicalModel(QuantileMixin, PyroSampleMixin, PyroSviTrainMixin
         export_slot: str = "mod",
         full_velocity_posterior = False,
         normalize = True, 
-        use_gpu = True):
+        use_gpu = True,
+        use_median = False):
         
         """
         Exports posteriors as quantiles. Similar to :py:meth:`cell2fate.Cell2fate_DynamicalModel.export_posterior` for more scalable workflow.
@@ -406,7 +440,7 @@ class Cell2fate_DynamicalModel(QuantileMixin, PyroSampleMixin, PyroSviTrainMixin
         
         quantiles_dict = {}
         for quantile in quantiles:
-            quantiles_dict[str(quantile)]=self.posterior_quantile(q=quantile,batch_size=batch_size, use_gpu=use_gpu)
+            quantiles_dict[str(quantile)]=self.posterior_quantile(q=quantile,batch_size=batch_size, use_gpu=use_gpu, use_median=use_median)
         adata.uns[export_slot] = self._export2adata_quantiles(quantiles_dict)
 
         self.samples = {}
@@ -524,10 +558,12 @@ class Cell2fate_DynamicalModel(QuantileMixin, PyroSampleMixin, PyroSviTrainMixin
                 n_problem_cells = torch.sum(count_sum == torch.min(count_sum))
                 if  n_problem_cells > 3:
                     problem_cells_index = count_sum == torch.min(count_sum)
-                    mu_m[problem_cells_index,:,0] = torch.tensor(np.random.sample(n_problem_cells), dtype = torch.float).unsqueeze(-1)*\
-                    torch.tensor(self.samples['post_sample_means']['mu_expression'][problem_cells_index,:,0], dtype = torch.float)*torch.tensor(10**(-5), dtype = torch.float)
-                    mu_m[problem_cells_index,:,1] = torch.tensor(np.random.sample(n_problem_cells), dtype = torch.float).unsqueeze(-1)*\
-                    torch.tensor(self.samples['post_sample_means']['mu_expression'][problem_cells_index,:,1], dtype = torch.float)*torch.tensor(10**(-5), dtype = torch.float)
+                    
+                    
+                    mu_m[problem_cells_index,:,0] = torch.tensor(np.random.sample(n_problem_cells)).unsqueeze(-1)*\
+                    torch.tensor(self.samples['post_sample_means']['mu_expression'][problem_cells_index,:,0])*torch.tensor(10**(-5))
+                    mu_m[problem_cells_index,:,1] = torch.tensor(np.random.sample(n_problem_cells)).unsqueeze(-1)*\
+                    torch.tensor(self.samples['post_sample_means']['mu_expression'][problem_cells_index,:,1])*torch.tensor(10**(-5))
                 adata.layers['Module ' + str(m) + 'Spliced Mean'] = mu_m[...,1]
                 adata.layers['Module ' + str(m) + ' Velocity'] = torch.tensor(self.samples['post_sample_means']['beta_g']) * \
                 mu_m[...,0] - torch.tensor(self.samples['post_sample_means']['gamma_g']) * mu_m[...,1]
@@ -536,9 +572,12 @@ class Cell2fate_DynamicalModel(QuantileMixin, PyroSampleMixin, PyroSviTrainMixin
                                                        velocity_key = 'Module ' + str(m) + ' Velocity',
                                                        spliced_key = 'Module ' + str(m) + 'Spliced Mean')
                 if plot:
-                    scv.pl.velocity_embedding_stream(adata, basis='umap', save = False, vkey='Module ' + str(m) + ' Velocity',
-                                                     **plotting_kwargs, show = False, ax = ax[m])
-                    ax[m].set_title('Module ' + str(m) + '\n Velocity Graph UMAP Embedding')
+                    try:
+                        scv.pl.velocity_embedding_stream(adata, basis='umap', save = False, vkey='Module ' + str(m) + ' Velocity',
+                                                         **plotting_kwargs, show = False, ax = ax[m])
+                        ax[m].set_title('Module ' + str(m) + '\n Velocity Graph UMAP Embedding')
+                    except:
+                        print(f"no velocity for module {m}")
                 del adata.layers['Module ' + str(m) + 'Spliced Mean']
                 del mu_m
 
@@ -550,7 +589,7 @@ class Cell2fate_DynamicalModel(QuantileMixin, PyroSampleMixin, PyroSviTrainMixin
             
 
     def compute_and_plot_total_velocity(self, adata, delete = True, plot = True, save = None,
-                                     plotting_kwargs = {"color": 'clusters', 'legend_fontsize': 10, 'legend_loc': 'right_margin'}):
+                                     plotting_kwargs = {"color": 'clusters', 'legend_fontsize': 10, 'legend_loc': 'right_margin'}, return_adata=False):
         """
         Computes total RNA velocity, as well as associated "velocity graph" and 
         then plots results on a UMAP based on the method in:
@@ -592,6 +631,7 @@ class Cell2fate_DynamicalModel(QuantileMixin, PyroSampleMixin, PyroSviTrainMixin
             del adata.layers['Spliced Mean']
             if delete:
                 del adata.layers['Velocity']
+
                 
     def compute_and_plot_total_velocity_scvelo(self, adata, delete = True, plot = True, save = None,
                                      plotting_kwargs = {"color": 'clusters', 'legend_fontsize': 10, 'legend_loc': 'right_margin'}):
@@ -974,7 +1014,7 @@ class Cell2fate_DynamicalModel(QuantileMixin, PyroSampleMixin, PyroSviTrainMixin
                 T_c[:,:,0],
                 torch.tensor(np.mean(self.samples['post_sample_means']['T_mON'][:,:,m])),
                 torch.tensor(np.mean(self.samples['post_sample_means']['T_mOFF'][:,:,m])),
-                torch.zeros((n_obs+1, self.module.model.n_vars)))[...,1], axis = -1)
+                torch.zeros((n_obs, self.module.model.n_vars)))[...,1], axis = -1)
         abundance2 = torch.sum(mu_mRNA_continousAlpha_globalTime_twoStates(
                 torch.tensor(self.samples['post_sample_means']['A_mgON'][m,:]),
                 torch.tensor(0.),
@@ -984,8 +1024,9 @@ class Cell2fate_DynamicalModel(QuantileMixin, PyroSampleMixin, PyroSviTrainMixin
                 T_c[:,:,0],
                 torch.tensor(np.mean(self.samples['post_sample_means']['T_mON'][:,:,m])),
                 torch.tensor(np.mean(self.samples['post_sample_means']['T_mOFF'][:,:,m]))*1000.,
-                torch.zeros((n_obs+1, self.module.model.n_vars)))[...,1], axis = -1)
+                torch.zeros((n_obs, self.module.model.n_vars)))[...,1], axis = -1)
         steady_state = torch.sum(torch.tensor(self.samples['post_sample_means']['A_mgON'][m,:])/torch.tensor(self.samples['post_sample_means']['gamma_g']))
+                        
         plt.axhspan(xmin = 0, xmax = 1, ymin = steady_state*0.95, ymax = steady_state,
                     facecolor='lime', alpha=0.5)
         plt.axhspan(xmin = 0, xmax = (np.mean(self.samples['post_sample_means']['T_mOFF'][:,:,m])-time_min)/(time_max-time_min), ymin = steady_state*0.05, ymax = steady_state*0.95,

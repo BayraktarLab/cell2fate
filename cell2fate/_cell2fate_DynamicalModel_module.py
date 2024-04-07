@@ -356,6 +356,7 @@ class Cell2fate_DynamicalModel_module(PyroModule):
             
         return pyro.plate("obs_plate", size=self.n_obs, dim=-3, subsample=idx)
 
+            
     def list_obs_plate_vars(self):
         """
         Creates a dictionary with the name of observation/minibatch plate, indexes of model args to provide to encoder, variable names that belong to the observation plate and the number of dimensions in non-plate axis of each variable.

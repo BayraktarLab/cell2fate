@@ -20,7 +20,6 @@ from scvelo.plotting.utils import (
     velocity_embedding_changed,
 )
 from scvelo.plotting.velocity_embedding_grid import compute_velocity_on_grid
-
 def get_ax(ax, show=None, figsize=None, dpi=None, projection=None):
     figsize, _ = get_figure_params(figsize)
     if ax is None:
@@ -28,6 +27,14 @@ def get_ax(ax, show=None, figsize=None, dpi=None, projection=None):
         fig, ax = pl.subplots(
             figsize=figsize, dpi=dpi, subplot_kw={"projection": projection}
         )
+    return fig, ax, show
+
+def get_ax_new(ax, show=None, figsize=None, dpi=None, projection=None):
+    figsize, _ = get_figure_params(figsize)
+    projection = "3d" if projection == "3d" else None
+    fig, ax_new = pl.subplots(
+        figsize=figsize, dpi=dpi, subplot_kw={"projection": projection}
+    )
     return fig, ax, show
 
 
@@ -223,7 +230,7 @@ def velocity_embedding_stream_modules(
         ):
             if i < len(multikey):
                 ax.append(
-                    velocity_embedding_stream(
+                    velocity_embedding_stream_modules(
                         adata,
                         size=size,
                         smooth=smooth,
@@ -235,6 +242,7 @@ def velocity_embedding_stream_modules(
                         title=title[i] if isinstance(title, (list, tuple)) else title,
                         X_grid=None if len(vkeys) > 1 else X_grid,
                         V_grid=None if len(vkeys) > 1 else V_grid,
+                        modules=modules,
                         **scatter_kwargs,
                         **stream_kwargs,
                         **kwargs,
@@ -245,7 +253,10 @@ def velocity_embedding_stream_modules(
             return ax
 
     else:
-        fig, ax, show = get_ax(ax, show, figsize, dpi)
+        try:
+            fig, ax, show = get_ax(ax, show, figsize, dpi)
+        except:
+            fig, ax, show =  get_ax_new(ax, show, figsize, dpi)
         
         if scatter_kwargs['legend_loc'] == 'right_margin':
             gs = gridspec.GridSpec(2, 1, height_ratios=[1, 0.05]) 
