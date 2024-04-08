@@ -43,18 +43,6 @@ Cell2Fate RNA velocity modules can also be mapped spatially when used together w
    notebooks/publication_figures/cell2fate_HumanDevelopingBrain
    notebooks/publication_figures/cell2location_HumanDevelopingBrain
    
-===========================
-Scalable Cell2Fate Workflow
-===========================
-
-For very large datasets, e.g. more than 50000 cells, we provide a more scalable cell2fate workflow in :doc:`here </notebooks/additional_notebooks/cell2fate_PancreasWithCC_quantile_newclass>`. 
-
-.. toctree::
-   :maxdepth: 5
-   :caption: Scalable workflow:
-
-   notebooks/additional_notebooks/cell2fate_PancreasWithCC_quantile_newclass
-   
 See other notebooks to reproduce publication figures.
 
 .. toctree::
