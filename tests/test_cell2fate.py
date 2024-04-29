@@ -138,7 +138,7 @@ def test_cell2fate():
     # test amortized (currently experimental just for coverage of the else statement.)
     adata_train = c2f.utils.get_training_data(adata, cells_per_cluster=30, cluster_column='clusters', remove_clusters=clusters_to_remove, min_shared_counts=5, n_var_genes=50)
     c2f.Cell2fate_DynamicalModel_amortized.setup_anndata(adata_train, spliced_label='spliced', unspliced_label='unspliced')
-    mod_amortised = c2f.Cell2fate_DynamicalModel_amortized(adata_train, n_modules=n_modules, encoder_kwargs={})
+    mod_amortised = c2f.Cell2fate_DynamicalModel_amortized(adata_train, n_modules=n_modules)
     mod_amortised.train(max_epochs=5, accelerator=accelerator)
 
     # test view history
