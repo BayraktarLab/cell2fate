@@ -33,7 +33,7 @@ from ._velocity_embedding_stream import velocity_embedding_stream_modules
 import scipy
 import gseapy as gp
 from cell2fate._pyro_base_cell2fate_module import Cell2FateBaseModule
-from cell2fate._pyro_mixin import PltExportMixin, QuantileMixin
+from cell2fate._pyro_mixin import QuantileMixin
 from ._cell2fate_DynamicalModel_amortized_module import \
 Cell2fate_DynamicalModel_amortized_module
 from cell2fate.utils import multiplot_from_generator
@@ -41,7 +41,7 @@ from cell2fate.utils import multiplot_from_generator
 from cell2fate.utils import mu_mRNA_continousAlpha_globalTime_twoStates
 import cell2fate as c2f
 
-class Cell2fate_DynamicalModel_amortized(QuantileMixin, PyroSampleMixin, PyroSviTrainMixin, PltExportMixin, BaseModelClass):
+class Cell2fate_DynamicalModel_amortized(QuantileMixin, PyroSampleMixin, PyroSviTrainMixin, BaseModelClass):
     """
     Cell2fate model. User-end model class. See Module class for description of the model.
 
