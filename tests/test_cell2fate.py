@@ -150,9 +150,6 @@ def test_cell2fate():
     
     # test export posterior samples
     adata_posterior = mod.export_posterior(adata_train, sample_kwargs={"num_samples": 20, "batch_size": None, "use_gpu": use_gpu, 'return_samples': True})
-
-    # test batch export of posterior quantiles
-    adata_posterior_amortized = mod_amortised.export_posterior_quantiles(adata_train, use_gpu = use_gpu)
     
     # test batch export posterior sampling
     adata_posterior = mod.export_posterior(adata_train, sample_kwargs={"num_samples": 20, "batch_size": 20, "use_gpu": use_gpu, 'return_samples': True})
@@ -228,4 +225,7 @@ def test_cell2fate():
     c2f.Cell2fate_DynamicalModel.setup_anndata(adata_train, spliced_label='spliced', unspliced_label='unspliced')
     mod = c2f.Cell2fate_DynamicalModel(adata_train, n_modules=n_modules)
     mod.train(batch_size = 50, max_epochs = 5, **{'training_plan' : PyroAggressiveTrainingPlan1}, accelerator=accelerator)
+    
+    # test export of posterior quantiles from amortized model
+    adata_posterior_amortized = mod_amortised.export_posterior_quantiles(adata_train, use_gpu = use_gpu)
     
