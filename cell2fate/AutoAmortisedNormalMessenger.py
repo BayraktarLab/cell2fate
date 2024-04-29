@@ -19,22 +19,6 @@ from torch.distributions import biject_to, constraints
 from cell2fate.nn import FCLayers
 
 
-def log_sum_exp(value, dim=None, keepdim=False):
-    """Numerically stable implementation of the operation
-    value.exp().sum(dim, keepdim).log()
-    """
-    if dim is not None:
-        m, _ = torch.max(value, dim=dim, keepdim=True)
-        value0 = value - m
-        if keepdim is False:
-            m = m.squeeze(dim)
-        return m + torch.log(torch.sum(torch.exp(value0), dim=dim, keepdim=keepdim))
-    else:
-        m = torch.max(value)
-        sum_exp = torch.sum(torch.exp(value - m))
-        return m + torch.log(sum_exp)
-
-
 class FCLayersPyro(FCLayers, PyroModule):
     pass
 
@@ -180,11 +164,6 @@ class AutoAmortisedHierarchicalNormalMessenger(AutoHierarchicalNormalMessenger):
             return self._get_posterior_median(name, prior)
         if self._computing_quantiles:
             return self._get_posterior_quantiles(name, prior)
-        if self._computing_mi:
-            # the messenger autoguide needs the output to fit certain dimensions
-            # this is hack which saves MI to self.mi but returns cheap to compute medians
-            self.mi[name] = self._get_mutual_information(name, prior)
-            return self._get_posterior_median(name, prior)
 
         with helpful_support_errors({"name": name, "fn": prior}):
             transform = biject_to(prior.support)
@@ -522,71 +501,3 @@ class AutoAmortisedHierarchicalNormalMessenger(AutoHierarchicalNormalMessenger):
         site_quantiles = torch.tensor(self._quantile_values, dtype=loc.dtype, device=loc.device)
         site_quantiles_values = dist.Normal(loc, scale).icdf(site_quantiles)
         return transform(site_quantiles_values)
-
-    def mutual_information(self, *args, **kwargs):
-        # compute samples necessary to compute MI
-        self.samples_for_mi = self(*args, **kwargs)
-        self._computing_mi = True
-        try:
-            # compute mi (saved to self.mi)
-            self(*args, **kwargs)
-            return self.mi
-        finally:
-            self._computing_mi = False
-
-    @torch.no_grad()
-    def _get_mutual_information(self, name, prior):
-        """Approximate the mutual information between data x and latent variable z
-
-            I(x, z) = E_xE_{q(z|x)}log(q(z|x)) - E_xE_{q(z|x)}log(q(z))
-
-        Returns: Float
-
-        """
-
-        #### get posterior mean and variance ####
-        transform = biject_to(prior.support)
-        if (self._hierarchical_sites is None) or (name in self._hierarchical_sites):
-            loc, scale, weight = self._get_params(name, prior)
-            loc = loc + transform.inv(prior.mean) * weight
-        else:
-            loc, scale = self._get_params(name, prior)
-
-        if name not in self.amortised_plate_sites["sites"].keys():
-            # if amortisation is not used for a particular site return MI=0
-            return 0
-
-        #### create tensors with useful numbers ####
-        one = torch.ones((), dtype=loc.dtype, device=loc.device)
-        two = torch.tensor(2, dtype=loc.dtype, device=loc.device)
-        pi = torch.tensor(3.14159265359, dtype=loc.dtype, device=loc.device)
-        #### get sample from posterior ####
-        z_samples = self.samples_for_mi[name]
-
-        #### compute mi ####
-        x_batch, nz = loc.size()
-        x_batch = torch.tensor(x_batch, dtype=loc.dtype, device=loc.device)
-        nz = torch.tensor(nz, dtype=loc.dtype, device=loc.device)
-
-        # E_{q(z|x)}log(q(z|x)) = -0.5*nz*log(2*\pi) - 0.5*(1+scale.loc()).sum(-1)
-        neg_entropy = (
-            -nz * torch.log(pi * two) * (one / two) - ((scale**two).log() + one).sum(-1) * (one / two)
-        ).mean()
-
-        # [1, x_batch, nz]
-        loc, scale = loc.unsqueeze(0), scale.unsqueeze(0)
-        var = scale**two
-
-        # (z_batch, x_batch, nz)
-        dev = z_samples - loc
-
-        # (z_batch, x_batch)
-        log_density = -((dev**two) / var).sum(dim=-1) * (one / two) - (
-            nz * torch.log(pi * two) + (scale**two).log().sum(-1)
-        ) * (one / two)
-
-        # log q(z): aggregate posterior
-        # [z_batch]
-        log_qz = log_sum_exp(log_density, dim=1) - torch.log(x_batch)
-
-        return (neg_entropy - log_qz.mean(-1)).item()

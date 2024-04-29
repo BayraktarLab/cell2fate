@@ -99,32 +99,6 @@ class FCLayers(nn.Module):
         user_cond = layer_num == 0 or (layer_num > 0 and self.inject_covariates)
         return user_cond
 
-    def set_online_update_hooks(self, hook_first_layer=True):
-        self.hooks = []
-
-        def _hook_fn_weight(grad):
-            categorical_dims = sum(self.n_cat_list)
-            new_grad = torch.zeros_like(grad)
-            if categorical_dims > 0:
-                new_grad[:, -categorical_dims:] = grad[:, -categorical_dims:]
-            return new_grad
-
-        def _hook_fn_zero_out(grad):
-            return grad * 0
-
-        for i, layers in enumerate(self.fc_layers):
-            for layer in layers:
-                if i == 0 and not hook_first_layer:
-                    continue
-                if isinstance(layer, nn.Linear):
-                    if self.inject_into_layer(i):
-                        w = layer.weight.register_hook(_hook_fn_weight)
-                    else:
-                        w = layer.weight.register_hook(_hook_fn_zero_out)
-                    self.hooks.append(w)
-                    b = layer.bias.register_hook(_hook_fn_zero_out)
-                    self.hooks.append(b)
-
     def forward(self, x: torch.Tensor, *cat_list: int):
         """
         Forward computation on ``x``.
