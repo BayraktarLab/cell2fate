@@ -151,6 +151,9 @@ def test_cell2fate():
     # test export posterior samples
     adata_posterior = mod.export_posterior(adata_train, sample_kwargs={"num_samples": 20, "batch_size": None, "use_gpu": use_gpu, 'return_samples': True})
 
+    # test batch export of posterior quantiles
+    adata_posterior = export_posterior_quantiles(adata, batch_size = None,
+                                                 use_gpu = use_gpu)
     
     # test batch export posterior sampling
     adata_posterior = mod.export_posterior(adata_train, sample_kwargs={"num_samples": 20, "batch_size": 20, "use_gpu": use_gpu, 'return_samples': True})
