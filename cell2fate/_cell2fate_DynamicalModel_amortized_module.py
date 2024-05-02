@@ -17,14 +17,7 @@ Cell2fate_DynamicalModel_module
 
 class Cell2fate_DynamicalModel_amortized_module(Cell2fate_DynamicalModel_module):
     r"""
-    - Models spliced and unspliced counts for each gene as a dynamical process in which transcriptional modules switch on
-    at one point in time and increase the transcription rate by different values across genes and then optionally switches off
-    to a transcription rate of 0. Splicing and degredation rates are constant for each gene. 
-    - The underlying equations are similar to
-    "Bergen et al. (2020), Generalizing RNA velocity to transient cell states through dynamical modeling"
-    - In addition, the model includes negative binomial noise, batch effects and technical variables, similar to:
-    "Kleshchevnikov et al. (2022), Cell2location maps fine-grained cell types in spatial transcriptomics".
-    Although in the final version of this model technical variables will be modelled seperately for spliced and unspliced counts.
+    Identical to DynamicalModel, but using amortization for cell-specific variables.
     """
     
     def create_plates(self, x_data, idx, batch_index):
