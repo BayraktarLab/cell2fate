@@ -12,8 +12,10 @@ from cell2fate.utils import G_a, G_b, mu_mRNA_continousAlpha_globalTime_twoState
 from pyro.infer import config_enumerate
 from pyro.ops.indexing import Vindex
 from torch.distributions import constraints
+from ._cell2fate_DynamicalModel_module import \
+Cell2fate_DynamicalModel_module
 
-class Cell2fate_DynamicalModel_amortized_module(PyroModule):
+class Cell2fate_DynamicalModel_amortized_module(Cell2fate_DynamicalModel_module):
     r"""
     - Models spliced and unspliced counts for each gene as a dynamical process in which transcriptional modules switch on
     at one point in time and increase the transcription rate by different values across genes and then optionally switches off
@@ -24,289 +26,10 @@ class Cell2fate_DynamicalModel_amortized_module(PyroModule):
     "Kleshchevnikov et al. (2022), Cell2location maps fine-grained cell types in spatial transcriptomics".
     Although in the final version of this model technical variables will be modelled seperately for spliced and unspliced counts.
     """
-
-    def __init__(
-        self,
-        n_obs,
-        n_vars,
-        n_batch,
-        n_extra_categoricals=None,
-        n_modules = 10,
-        stochastic_v_ag_hyp_prior={"alpha": 6.0, "beta": 3.0},
-        factor_prior={"rate": 1.0, "alpha": 1.0, "states_per_gene": 3.0},
-        t_switch_alpha_prior = {"mean": 1000., "alpha": 1000.},
-        splicing_rate_hyp_prior={"mean": 1.0, "alpha": 5.0,
-                                "mean_hyp_alpha": 10., "alpha_hyp_alpha": 20.},
-        degredation_rate_hyp_prior={"mean": 1.0, "alpha": 5.0,
-                                "mean_hyp_alpha": 10., "alpha_hyp_alpha": 20.},
-        activation_rate_hyp_prior={"mean_hyp_prior_mean": 2., "mean_hyp_prior_sd": 0.33,
-                                    "sd_hyp_prior_mean": 0.33, "sd_hyp_prior_sd": 0.1},
-        s_overdispersion_factor_hyp_prior={'alpha_mean': 100., 'beta_mean': 1.,
-                                           'alpha_sd': 1., 'beta_sd': 0.1},
-        detection_hyp_prior={"alpha": 10.0, "mean_alpha": 1.0, "mean_beta": 1.0},
-        detection_i_prior={"mean": 1, "alpha": 100},
-        detection_gi_prior={"mean": 1, "alpha": 200},
-        gene_add_alpha_hyp_prior={"alpha": 9.0, "beta": 3.0},
-        gene_add_mean_hyp_prior={"alpha": 1.0, "beta": 100.0},
-        Tmax_prior={"mean": 50., "sd": 50.},
-        switch_time_sd = 0.1,
-        init_vals: Optional[dict] = None
-    ):
-        
-        """
-
-        Parameters
-        ----------
-        n_obs
-        n_vars
-        n_batch
-        n_extra_categoricals
-        gene_add_alpha_hyp_prior
-        gene_add_mean_hyp_prior
-        detection_hyp_prior
-        """
-
-        ############# Initialise parameters ################
-        super().__init__()
-        self.n_modules = n_modules
-        self.n_obs = n_obs
-        self.n_vars = n_vars
-        self.n_batch = n_batch
-        self.n_extra_categoricals = n_extra_categoricals
-        self.factor_prior = factor_prior
-        
-        self.stochastic_v_ag_hyp_prior = stochastic_v_ag_hyp_prior
-        self.gene_add_alpha_hyp_prior = gene_add_alpha_hyp_prior
-        self.gene_add_mean_hyp_prior = gene_add_mean_hyp_prior
-        self.detection_hyp_prior = detection_hyp_prior
-        self.splicing_rate_hyp_prior = splicing_rate_hyp_prior
-        self.degredation_rate_hyp_prior = degredation_rate_hyp_prior
-        self.s_overdispersion_factor_hyp_prior = s_overdispersion_factor_hyp_prior
-        self.t_switch_alpha_prior = t_switch_alpha_prior
-        self.detection_gi_prior = detection_gi_prior
-        self.detection_i_prior = detection_i_prior
-
-        if (init_vals is not None) & (type(init_vals) is dict):
-            self.np_init_vals = init_vals
-            for k in init_vals.keys():
-                if k == 'I_cm':
-                    self.register_buffer(f"init_val_{k}", torch.tensor(init_vals[k], dtype = torch.long))
-                else:
-                    self.register_buffer(f"init_val_{k}", torch.tensor(init_vals[k]))
-         
-        self.register_buffer(
-            "n_modules_torch",
-            torch.tensor(n_modules, dtype = torch.float32),
-        )
-        
-        self.register_buffer(
-            "s_overdispersion_factor_alpha_mean",
-            torch.tensor(self.s_overdispersion_factor_hyp_prior["alpha_mean"]),
-        )
-        self.register_buffer(
-            "s_overdispersion_factor_beta_mean",
-            torch.tensor(self.s_overdispersion_factor_hyp_prior["beta_mean"]),
-        )
-        self.register_buffer(
-            "s_overdispersion_factor_alpha_sd",
-            torch.tensor(self.s_overdispersion_factor_hyp_prior["alpha_sd"]),
-        )
-        self.register_buffer(
-            "s_overdispersion_factor_beta_sd",
-            torch.tensor(self.s_overdispersion_factor_hyp_prior["beta_sd"]),
-        )
-        
-        self.register_buffer(
-            "detection_gi_prior_alpha",
-            torch.tensor(self.detection_gi_prior["alpha"]),
-        )
-        self.register_buffer(
-            "detection_gi_prior_beta",
-            torch.tensor(self.detection_gi_prior["alpha"] / self.detection_gi_prior["mean"]),
-        )
-        
-        self.register_buffer(
-            "detection_i_prior_alpha",
-            torch.tensor(self.detection_i_prior["alpha"]),
-        )
-        self.register_buffer(
-            "detection_i_prior_beta",
-            torch.tensor(self.detection_i_prior["alpha"] / self.detection_i_prior["mean"]),
-        )
-        
-        self.register_buffer(
-            "Tmax_mean",
-            torch.tensor(Tmax_prior["mean"]),
-        )
-             
-        self.register_buffer(
-            "Tmax_sd",
-            torch.tensor(Tmax_prior["sd"]),
-        )
-        
-        self.register_buffer(
-            "switch_time_sd",
-            torch.tensor(switch_time_sd),
-        )
-        
-        self.register_buffer(
-            "t_mi_alpha_alpha",
-            torch.tensor(t_switch_alpha_prior['alpha']),
-        )
-        
-        self.register_buffer(
-            "t_mi_alpha_mu",
-            torch.tensor(t_switch_alpha_prior['alpha']),
-        )
-        
-        self.t_switch_alpha_prior
-
-        self.register_buffer(
-            "detection_mean_hyp_prior_alpha",
-            torch.tensor(self.detection_hyp_prior["mean_alpha"]),
-        )
-        self.register_buffer(
-            "detection_mean_hyp_prior_beta",
-            torch.tensor(self.detection_hyp_prior["mean_beta"]),
-        )
-
-        self.register_buffer(
-            "stochastic_v_ag_hyp_prior_alpha",
-            torch.tensor(self.stochastic_v_ag_hyp_prior["alpha"]),
-        )
-        self.register_buffer(
-            "stochastic_v_ag_hyp_prior_beta",
-            torch.tensor(self.stochastic_v_ag_hyp_prior["beta"]),
-        )
-        self.register_buffer(
-            "gene_add_alpha_hyp_prior_alpha",
-            torch.tensor(self.gene_add_alpha_hyp_prior["alpha"]),
-        )
-        self.register_buffer(
-            "gene_add_alpha_hyp_prior_beta",
-            torch.tensor(self.gene_add_alpha_hyp_prior["beta"]),
-        )
-        self.register_buffer(
-            "gene_add_mean_hyp_prior_alpha",
-            torch.tensor(self.gene_add_mean_hyp_prior["alpha"]),
-        )
-        self.register_buffer(
-            "gene_add_mean_hyp_prior_beta",
-            torch.tensor(self.gene_add_mean_hyp_prior["beta"]),
-        )
-        
-        self.register_buffer(
-            "detection_hyp_prior_alpha",
-            torch.tensor(self.detection_hyp_prior["alpha"]),
-        )
-        
-        self.register_buffer("ones_n_batch_1", torch.ones((self.n_batch, 1)))
-        
-        self.register_buffer("ones", torch.ones((1, 1)))
-        self.register_buffer("ones2", torch.ones((self.n_obs, self.n_vars)))
-        self.register_buffer("eps", torch.tensor(1e-8))
-        self.register_buffer("alpha_OFFg", torch.tensor(10**(-5)))
-        self.register_buffer("one", torch.tensor(1.))
-        self.register_buffer("zero", torch.tensor(0.))
-        self.register_buffer("zero_point_one", torch.tensor(0.1))
-        self.register_buffer("one_point_one", torch.tensor(1.1))
-        self.register_buffer("one_point_two", torch.tensor(1.2))
-        self.register_buffer("zeros", torch.zeros(self.n_obs, self.n_vars))
-        self.register_buffer("ones_g", torch.ones((1,self.n_vars,1)))
-        self.register_buffer("ones_m", torch.ones(n_modules))
-        
-        # Register parameters for activation rate hyperprior:
-        self.register_buffer(
-            "activation_rate_mean_hyp_prior_mean",
-            torch.tensor(activation_rate_hyp_prior["mean_hyp_prior_mean"]),
-        )        
-        self.register_buffer(
-            "activation_rate_mean_hyp_prior_sd",
-            torch.tensor(activation_rate_hyp_prior["mean_hyp_prior_sd"]),
-        )
-        self.register_buffer(
-            "activation_rate_sd_hyp_prior_mean",
-            torch.tensor(activation_rate_hyp_prior["sd_hyp_prior_mean"]),
-        )
-        self.register_buffer(
-            "activation_rate_sd_hyp_prior_sd",
-            torch.tensor(activation_rate_hyp_prior["sd_hyp_prior_sd"]),
-        )     
-        
-        # Register parameters for splicing rate hyperprior:
-        self.register_buffer(
-            "splicing_rate_alpha_hyp_prior_mean",
-            torch.tensor(self.splicing_rate_hyp_prior["alpha"]),
-        )
-        self.register_buffer(
-            "splicing_rate_mean_hyp_prior_mean",
-            torch.tensor(self.splicing_rate_hyp_prior["mean"]),
-        )
-        self.register_buffer(
-            "splicing_rate_alpha_hyp_prior_alpha",
-            torch.tensor(self.splicing_rate_hyp_prior["alpha_hyp_alpha"]),
-        )
-        self.register_buffer(
-            "splicing_rate_mean_hyp_prior_alpha",
-            torch.tensor(self.splicing_rate_hyp_prior["mean_hyp_alpha"]),
-        )
-        
-        # Register parameters for degredation rate hyperprior:
-        self.register_buffer(
-            "degredation_rate_alpha_hyp_prior_mean",
-            torch.tensor(self.degredation_rate_hyp_prior["alpha"]),
-        )
-        self.register_buffer(
-            "degredation_rate_mean_hyp_prior_mean",
-            torch.tensor(self.degredation_rate_hyp_prior["mean"]),
-        )
-        self.register_buffer(
-            "degredation_rate_alpha_hyp_prior_alpha",
-            torch.tensor(self.degredation_rate_hyp_prior["alpha_hyp_alpha"]),
-        )
-        self.register_buffer(
-            "degredation_rate_mean_hyp_prior_alpha",
-            torch.tensor(self.degredation_rate_hyp_prior["mean_hyp_alpha"]),
-        ) 
-        
-        # per gene rate priors
-        self.register_buffer(
-            "factor_prior_alpha",
-            torch.tensor(self.factor_prior["alpha"]),
-        )
-        self.register_buffer(
-            "factor_prior_beta",
-            torch.tensor(self.factor_prior["alpha"] / self.factor_prior["rate"]),
-        )
-        
-        self.register_buffer("n_factors_torch", torch.tensor(self.n_modules))
-        
-        self.register_buffer(
-            "factor_states_per_gene",
-            torch.tensor(self.factor_prior["states_per_gene"]),
-        )
-        
-        self.register_buffer(
-            "t_c_init",
-            self.one*torch.ones((self.n_obs, 1, 1))/2.,
-        )
-        
-        self.register_buffer(
-            "t_mON_init",
-            torch.ones((1, 1, self.n_modules))/2.,
-        )  
-        
-        self.register_buffer(
-            "t_mOFF_init",
-            torch.zeros((1, 1, self.n_modules)) + 0.1,
-        )      
-        
-        self.register_buffer(
-            "probs_I_cm",
-            torch.tensor(1.-10**(-10)),
-        )
-            
-    ############# Define the model ################
+    
+    def create_plates(self, x_data, idx, batch_index):
+        return pyro.plate("obs_plate", size=self.n_obs, dim=-3, subsample=idx)
+    
     @staticmethod
     def _get_fn_args_from_batch_no_cat(tensor_dict):
         u_data = tensor_dict['unspliced']
@@ -325,17 +48,7 @@ class Cell2fate_DynamicalModel_amortized_module(PyroModule):
         batch_index = tensor_dict[REGISTRY_KEYS.BATCH_KEY]
         extra_categoricals = tensor_dict[REGISTRY_KEYS.CAT_COVS_KEY]
         return (x_data, ind_x, batch_index), {}
-
-    @property
-    def _get_fn_args_from_batch(self):
-        if self.n_extra_categoricals is not None:
-            return self._get_fn_args_from_batch_cat
-        else:
-            return self._get_fn_args_from_batch_no_cat
-
-    def create_plates(self, x_data, idx, batch_index):
-        return pyro.plate("obs_plate", size=self.n_obs, dim=-3, subsample=idx)
-
+    
     def list_obs_plate_vars(self):
         """Create a dictionary with the name of observation/minibatch plate,
         indexes of model args to provide to encoder,
@@ -538,3 +251,4 @@ class Cell2fate_DynamicalModel_amortized_module(PyroModule):
         with obs_plate:
             pyro.sample("data_target", dist.GammaPoisson(concentration= stochastic_v_ag,
                        rate= stochastic_v_ag / mu), obs=x_data)
+    
