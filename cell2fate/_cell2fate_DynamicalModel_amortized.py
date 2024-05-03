@@ -41,6 +41,7 @@ Cell2fate_DynamicalModel
 from cell2fate.utils import multiplot_from_generator
 from cell2fate.utils import mu_mRNA_continousAlpha_globalTime_twoStates
 import cell2fate as c2f
+from cell2fate._pyro_mixin import PyroTrainingPlan_ClippedAdamDecayingRate
 
 class Cell2fate_DynamicalModel_amortized(Cell2fate_DynamicalModel):
     """
@@ -96,3 +97,44 @@ class Cell2fate_DynamicalModel_amortized(Cell2fate_DynamicalModel):
         )
         self._model_summary_string = f'Cell2fate Dynamical Model with the following params: \nn_batch: {self.summary_stats["n_batch"]} '
         self.init_params_ = self._get_init_params(locals())
+    
+    def train(
+        self,
+        max_epochs: int = 500,
+        batch_size: int = 1000,
+        train_size: float = 1,
+        lr: float = 0.01,
+        **kwargs,
+    ):
+        """
+        Training function for the model.
+
+        Parameters
+        ----------
+        max_epochs
+            Number of passes through the dataset. If `None`, defaults to
+            ``np.min([round((20000 / n_cells) * 400), 400])``
+        train_size
+            Size of training set in the range [0.0, 1.0].
+        batch_size
+            Minibatch size to use during training. If `None`, no minibatching occurs and all
+            data is copied to device (e.g., GPU).
+        lr
+            Optimiser learning rate (default optimiser is :class:`~pyro.optim.ClippedAdam`).
+            Specifying optimiser via plan_kwargs overrides this choice of lr.
+        kwargs
+            Other arguments to :py:meth:`scvi.model.base.PyroSviTrainMixin().train` method
+        """
+        
+        self.max_epochs = max_epochs
+        kwargs["max_epochs"] = max_epochs
+        kwargs["batch_size"] = batch_size
+        kwargs["train_size"] = train_size
+        kwargs["lr"] = lr
+        kwargs["training_plan"] = PyroTrainingPlan_ClippedAdamDecayingRate
+        kwargs["early_stopping"] = True
+        kwargs["early_stopping_min_delta"] = 5*10**(-1)
+        kwargs["early_stopping_monitor"] = 'elbo_train'
+        kwargs["early_stopping_patience"] = 5
+
+        super().train(**kwargs)

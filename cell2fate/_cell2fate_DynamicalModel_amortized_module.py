@@ -54,11 +54,11 @@ class Cell2fate_DynamicalModel_amortized_module(Cell2fate_DynamicalModel_module)
                 return(x)
         
         return {
-            "n_in": 2*self.n_vars,
-            "name": "obs_plate",
-            "input": [0,2],
-            "input_transform": [gene_transform, no_transform],
-            "sites": {"t_c": (1,1),
+            "n_in": 2*self.n_vars, # size of encoder input layer
+            "name": "obs_plate", # name of plate that is being amortized
+            "input": [0,2], # position of input arguments in forward method
+            "input_transform": [gene_transform, no_transform], # transformation to input
+            "sites": {"t_c": (1,1), # dimensions left of plate dimension
                      "detection_y_c": (1,1)}}
     
     def forward(self, x_data, idx, batch_index):

@@ -266,35 +266,6 @@ class AutoAmortisedHierarchicalNormalMessenger(AutoHierarchicalNormalMessenger):
                         prior.mean.device
                     ),
                 )
-        if "multiple" in self.encoder_mode:
-            # determine the number of hidden layers
-            if name in self.n_hidden.keys():
-                n_hidden = self.n_hidden[name]
-            else:
-                n_hidden = self.n_hidden["multiple"]
-            multi_encoder_kwargs = deepcopy(self.multi_encoder_kwargs)
-            multi_encoder_kwargs["n_hidden"] = n_hidden
-
-            # create multiple encoders
-            if self.encoder_instance is not None:
-                # copy instances
-                encoder_ = deepcopy(self.encoder_instance).to(prior.mean.device)
-                # convert to pyro module
-                to_pyro_module_(encoder_)
-                deep_setattr(
-                    self,
-                    "multiple_encoders." + name,
-                    encoder_,
-                )
-            else:
-                # create instances
-                deep_setattr(
-                    self,
-                    "multiple_encoders." + name,
-                    self.encoder_class(n_in=multiple_n_in, n_out=n_hidden, **multi_encoder_kwargs).to(
-                        prior.mean.device
-                    ),
-                )
         return self.encode(name, prior)
 
     def _get_params(self, name: str, prior: Distribution):
