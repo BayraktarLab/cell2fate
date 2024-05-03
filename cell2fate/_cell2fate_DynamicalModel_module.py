@@ -15,10 +15,7 @@ from torch.distributions import constraints
 
 class Cell2fate_DynamicalModel_module(PyroModule):
     r"""
-    Models spliced and unspliced counts for each gene as a dynamical process in which transcriptional modules switch on at one point in time and increase the transcription rate by different values across genes and then optionally switches off to a transcription rate of 0. Splicing and degradation rates are constant for each gene. The underlying equations are similar to: "Bergen et al. (2020), Generalizing RNA velocity to transient cell states through dynamical modeling"
-    
-    .. note::
-        The model includes negative binomial noise, batch effects, and technical variables, similar to: "Kleshchevnikov et al. (2022), Cell2location maps fine-grained cell types in spatial transcriptomics". Although in the final version of this model technical variables will be modelled separately for spliced and unspliced counts.
+    Models spliced and unspliced counts for each gene as a dynamical process in which transcriptional modules switch on at one point in time and increase the transcription rate by different values across genes and then optionally switches off to a transcription rate of 0. Splicing and degradation rates are constant for each gene. The model also includes negative binomial noise, batch effects, and technical variables.
 
     Parameters
     ----------
