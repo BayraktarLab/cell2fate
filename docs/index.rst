@@ -25,6 +25,7 @@ The standard recommended workflow for using Cell2Fate can be found in the quick 
 
    notebooks/publication_figures/cell2fate_PancreasWithCC
 
+   notebooks/publication_figures/cell2fate_AssessingConfidence
 
 ==================================
 Cell2Fate + Cell2Location Workflow
