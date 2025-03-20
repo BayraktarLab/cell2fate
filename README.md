@@ -23,6 +23,12 @@ conda create -y -n cell2fate_env python=3.9
 conda activate cell2fate_env
 pip install git+https://github.com/BayraktarLab/cell2fate
 ```
+If you use CUDA > 10.2 you will need to install a newer pytorch version into the environment like this:
+
+```bash
+conda activate cell2fate_env
+pip install torch torchvision --extra-index-url https://download.pytorch.org/whl/cu116
+```
 
 To use this environment in a jupyter notebook, add a jupyter kernel for this environment:
 
